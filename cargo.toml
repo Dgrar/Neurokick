@@ -3,8 +3,3 @@ resolver = "2"
 members = [
     "libs/*",
 ]
-
-[package]
-name = "neurokick"
-version = "0.1.0"
-edition = "2021"

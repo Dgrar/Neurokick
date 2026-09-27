@@ -1,27 +1,34 @@
 use crate::*;
+use nalgebra::Point2;
 
 pub struct GameWorld {
-    physics: PhysicsWorld,
-    players: Vec<Player>,
-    ball: GameBall,
+    pub physics: PhysicsWorld,
+    pub players: Vec<Player>,
+    pub ball: GameBall,
 }
 
 impl GameWorld {
-    pub fn new(physics: PhysicsWorld, players: Vec<Player>, ball: GameBall) -> GameWorld {
+    pub fn new(mut physics: PhysicsWorld) -> GameWorld {
+        physics.gravity *= 0.0;
+        let players = vec![Player::new(&mut physics, Point2::new(-25.0, 0.0))];
+
+        let ball = GameBall::new(&mut physics, Point2::new(0.0, 0.0));
+
         GameWorld {
             physics,
             players,
             ball,
         }
     }
+
     pub fn step(&mut self) {
         self.physics.step();
     }
 
     pub fn apply_external_force(&mut self, idx: usize, fx: f32, fy: f32) {
-        self.players[idx]
-            .physics
-            .apply_force(&mut self.physics, fx, fy);
+        if let Some(player) = self.players.get_mut(idx) {
+            player.physics.apply_force(&mut self.physics, fx, fy);
+        }
     }
 
     pub fn get_world_state(&self) -> GameData {
@@ -38,6 +45,6 @@ impl GameWorld {
 
 #[derive(Clone, Debug)]
 pub struct GameData {
-    player_positions: Vec<[f32; 2]>,
-    ball_position: [f32; 2],
+    pub player_positions: Vec<[f32; 2]>,
+    pub ball_position: [f32; 2],
 }

@@ -1,3 +1,5 @@
+use nalgebra::Point2;
+
 use crate::*;
 
 pub struct PhysicsComponent {
@@ -11,7 +13,7 @@ pub struct PhysicsComponent {
 impl PhysicsComponent {
     pub fn new_circular(
         physics_world: &mut PhysicsWorld,
-        pos: [f32; 2],
+        pos: Point2<f32>,
         radius: f32,
         mass: f32,
         max_speed: f32,

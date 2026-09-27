@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neurokick — Visualización</title>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+    <header class="topbar">
+        <div class="title">
+            <h1>Neurokick</h1>
+            <p class="subtitle">Visualización de la simulación · <code>Simulation.visualize()</code> → Canvas 2D</p>
+        </div>
+        <div id="modeBadge" class="badge badge-loading" title="Origen de los datos">cargando…</div>
+    </header>
+
+    <main class="layout">
+        <section class="pitch-wrap">
+            <canvas id="pitch" aria-label="Campo de fútbol con jugadores y balón"></canvas>
+            <div id="loadError" class="load-error" hidden></div>
+        </section>
+
+        <aside class="panel">
+            <div class="card">
+                <h2>Controles</h2>
+                <div class="btn-row">
+                    <button id="btnPlay" type="button" class="btn primary">⏸ Pausar</button>
+                    <button id="btnStep" type="button" class="btn" title="Avanza un paso de física (S)">⏭ Paso</button>
+                    <button id="btnReset" type="button" class="btn" title="Crea una Simulation nueva (R)">↺ Reset</button>
+                </div>
+                <label class="slider-row" for="speed">
+                    <span>Pasos / frame: <strong id="speedVal">2</strong></span>
+                    <input id="speed" type="range" min="1" max="8" step="1" value="2" />
+                </label>
+                <div class="check-row">
+                    <label><input id="chkTrails" type="checkbox" checked /> Estela del balón</label>
+                    <label><input id="chkCoords" type="checkbox" checked /> Coordenadas</label>
+                </div>
+                <p class="hint">Atajos: <kbd>Espacio</kbd> play/pausa · <kbd>S</kbd> paso · <kbd>R</kbd> reset</p>
+            </div>
+
+            <div class="card">
+                <h2>Estado</h2>
+                <dl class="state">
+                    <div><dt>Frame</dt><dd id="stFrame">0</dd></div>
+                    <div><dt>FPS</dt><dd id="stFps">—</dd></div>
+                    <div><dt>Modo</dt><dd id="stMode">…</dd></div>
+                    <div><dt>Jugadores</dt><dd id="stPlayers">—</dd></div>
+                </dl>
+                <pre id="stPos" class="positions">esperando datos…</pre>
+            </div>
+
+            <div class="card legend">
+                <h2>Leyenda</h2>
+                <ul>
+                    <li><span class="dot dot-p0"></span> Jugador 0 (equipo A)</li>
+                    <li><span class="dot dot-p1"></span> Jugador 1+ (equipo B / siguientes)</li>
+                    <li><span class="dot dot-ball"></span> Balón + estela</li>
+                </ul>
+                <p class="note">
+                    Campo estándar inventado de <strong>105 × 68 m</strong> centrado en (0,0),
+                    porque el Rust actual no define límites ni porterías (solo expone
+                    <code>x, y</code> de jugadores y balón). Los cuerpos se dibujan a
+                    escala real con los radios de la física
+                    (<code>PLAYER_RADIUS</code> / <code>BALL_RADIUS</code>),
+                    con un mínimo de 6 px para seguir viéndolos en 105 m.
+                    Sin cerebro (Fase 1) no hay fuerzas: la escena real es estática
+                    hasta que la red neuronal aplique fuerzas.
+                </p>
+            </div>
+        </aside>
+    </main>
+
+    <script type="module" src="./script.js"></script>
+</body>
+</html>

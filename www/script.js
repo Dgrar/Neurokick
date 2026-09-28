@@ -4,6 +4,7 @@
 //   Simulation::new() -> Simulation
 //   Simulation::visualize() -> Data   (avanza 1 step y devuelve el estado)
 //   Simulation::train()               (avanza 1 step sin devolver nada)
+//   Simulation::kick(idx)             (chut si el balón está a rango)
 //   Data { players: Vec<Player { x, y }>, ball: Ball { x, y } }
 //
 // El campo es inventado (105x68 m, centro en 0,0) porque la física aún no
@@ -35,6 +36,7 @@ class MockSimulation {
         this.px = -5; this.py = 0; this.pvx = 0; this.pvy = 0;
         this.bx = 0; this.by = 0; this.bvx = 2.5; this.bvy = 1.2;
         this.dt = 1 / 120;
+        this.kfx = 0; this.kfy = 0; // fuerza externa pendiente (un paso)
     }
     train() {this.#step();}
     visualize() {
@@ -44,12 +46,20 @@ class MockSimulation {
             ball: {x: this.bx, y: this.by},
         };
     }
+    apply_external_force(idx, fx, fy) {if (idx === 0) {this.kfx = fx; this.kfy = fy;} }
+    kick(idx) {
+        if (idx !== 0) return;
+        const dx = this.bx - this.px, dy = this.by - this.py;
+        const d = Math.hypot(dx, dy) || 1e-6;
+        if (d < vis.playerR + vis.ballR + 0.2) {this.bvx += dx / d * 10; this.bvy += dy / d * 10;}
+    }
     player_radius() {return vis.playerR;}
     ball_radius() {return vis.ballR;}
     #step() {
         // Jugador: fuerza proporcional hacia el balón + amortiguación.
-        const fx = (this.bx - this.px) * 6 - this.pvx * 1.2;
-        const fy = (this.by - this.py) * 6 - this.pvy * 1.2;
+        const fx = (this.bx - this.px) - this.pvx * 1.2 + this.kfx / 10;
+        const fy = (this.by - this.py) - this.pvy * 1.2 + this.kfy / 10;
+        this.kfx = 0; this.kfy = 0; // la fuerza externa dura un paso
         this.pvx += fx * this.dt; this.pvy += fy * this.dt;
         const sp = Math.hypot(this.pvx, this.pvy);
         if (sp > 10) {this.pvx *= 10 / sp; this.pvy *= 10 / sp;}
@@ -253,6 +263,15 @@ function drawEntities(state, showCoords) {
     ctx.arc(X(state.ball.x), Y(state.ball.y), RD(vis.ballR), 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+    // Anillo expansivo al chutar.
+    const kft = performance.now() - app.kickFlashT;
+    if (kft < 400) {
+        ctx.strokeStyle = `rgba(255,220,80,${(1 - kft / 400).toFixed(3)})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(X(state.ball.x), Y(state.ball.y), RD(vis.ballR) + (kft / 400) * R(8), 0, Math.PI * 2);
+        ctx.stroke();
+    }
 
     // Jugadores.
     state.players.forEach((p, i) => {
@@ -308,6 +327,9 @@ const ui = {
     mode: document.getElementById("stMode"),
     nplayers: document.getElementById("stPlayers"),
     pos: document.getElementById("stPos"),
+    inputNote: document.getElementById("inputNote"),
+    kick0: document.getElementById("btnKick0"),
+    kick1: document.getElementById("btnKick1"),
 };
 
 const app = {
@@ -320,6 +342,7 @@ const app = {
     trail: [],
     fpsEMA: 60,
     lastT: performance.now(),
+    kickFlashT: 0, // timestamp del último chut (anillo visual)
 };
 
 function setBadge() {
@@ -329,9 +352,49 @@ function setBadge() {
     ui.mode.textContent = app.mode;
 }
 
+const KEY_FORCE = 2000; // N (control fino: ~12 m por segundo mantenido, toques cortos ~1 m)
+const keysDown = new Set();
+
+function axisFor(neg, pos) {
+    return (keysDown.has(pos) ? 1 : 0) - (keysDown.has(neg) ? 1 : 0);
+}
+
+
+// Aplica las fuerzas del teclado antes de cada paso de física (así no
+// depende de si el motor conserva fuerzas entre pasos):
+// WASD -> jugador 0, flechas -> jugador 1.
+function applyKeyForces() {
+    const sim = app.sim;
+    if (!sim || typeof sim.apply_external_force !== "function") return;
+    const n = app.state.players.length;
+    const moves = [
+        {fx: axisFor("KeyA", "KeyD"), fy: axisFor("KeyS", "KeyW")},
+        {fx: axisFor("ArrowLeft", "ArrowRight"), fy: axisFor("ArrowDown", "ArrowUp")},
+    ];
+    moves.forEach((m, idx) => {
+        if (idx >= n) return;
+        const len = Math.hypot(m.fx, m.fy);
+        if (len === 0) return;
+        const k = KEY_FORCE / Math.max(1, len); // la diagonal no corre más
+        try {sim.apply_external_force(idx, m.fx * k, m.fy * k);}
+        catch (err) {console.warn("[neurokick] apply_external_force falló:", err);}
+    });
+}
+
+// Chuta con el jugador idx (si el wasm lo expone y el jugador existe).
+// En Rust solo tiene efecto a rango (PLAYER_RADIUS + BALL_RADIUS + 0.2).
+function doKick(idx) {
+    const sim = app.sim;
+    if (!sim || typeof sim.kick !== "function") return;
+    if (idx >= app.state.players.length) {console.log("[neurokick] chut ignorado: no existe el jugador " + idx); return;}
+    try {sim.kick(idx); app.kickFlashT = performance.now(); console.log("[neurokick] chut jugador " + idx);}
+    catch (err) {console.warn("[neurokick] kick falló:", err);}
+}
+
 function advance(steps) {
     for (let i = 0; i < steps; i++) {
         try {
+            applyKeyForces();
             app.state = snapshot(app.sim.visualize());
         } catch (err) {
             console.error("[neurokick] visualize() falló:", err);
@@ -350,6 +413,13 @@ function setRunning(v) {
     app.running = v;
     ui.play.textContent = v ? "⏸ Pausar" : "▶ Reanudar";
     ui.step.disabled = v;
+}
+
+function updateInputNote() {
+    const n = app.state.players.length;
+    ui.inputNote.textContent = n > 1
+        ? "Teclado activo: WASD → jugador 0 · Flechas → jugador 1."
+        : "Teclado activo: WASD → jugador 0 · Flechas sin efecto (el sim trae 1 jugador).";
 }
 
 function reset() {
@@ -380,6 +450,7 @@ function loop(now) {
         ui.frame.textContent = String(app.frame);
         ui.fps.textContent = app.fpsEMA.toFixed(0);
         ui.nplayers.textContent = String(app.state.players.length);
+        updateInputNote();
         const lines = app.state.players.map((p, i) => `jugador ${i}: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
         lines.push(`balón: (${app.state.ball.x.toFixed(2)}, ${app.state.ball.y.toFixed(2)})`);
         ui.pos.textContent = lines.join("\n");
@@ -392,15 +463,24 @@ function loop(now) {
 ui.play.addEventListener("click", () => setRunning(!app.running));
 ui.step.addEventListener("click", () => {if (!app.running) advance(1);});
 ui.reset.addEventListener("click", reset);
+ui.kick0.addEventListener("click", () => doKick(0));
+ui.kick1.addEventListener("click", () => doKick(1));
 ui.speed.addEventListener("input", () => {
     app.stepsPerFrame = Number(ui.speed.value);
     ui.speedVal.textContent = ui.speed.value;
 });
+const GAME_KEYS = ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"];
 window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && e.target === document.body) {e.preventDefault(); setRunning(!app.running);}
-    else if (e.key === "s" || e.key === "S") {if (!app.running) advance(1);}
-    else if (e.key === "r" || e.key === "R") {reset();}
+    if (e.target !== document.body) return; // no robar teclas al slider
+    if (GAME_KEYS.includes(e.code)) {keysDown.add(e.code); e.preventDefault();}
+    if (e.code === "Space") setRunning(!app.running);
+    else if (e.code === "KeyN") {if (!app.running) advance(1);}
+    else if (e.code === "KeyR") reset();
+    else if (e.code === "KeyF") doKick(0);
+    else if (e.code === "Enter") doKick(1);
 });
+window.addEventListener("keyup", (e) => keysDown.delete(e.code));
+window.addEventListener("blur", () => keysDown.clear());
 
 // ---------------------------------------------------------------- init
 
@@ -419,5 +499,6 @@ loadSimulation().then(({sim, mode}) => {
     advance(1);
     requestAnimationFrame(loop);
 });
+
 
 window.__neurokick = app;

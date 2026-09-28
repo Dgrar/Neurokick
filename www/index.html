@@ -28,6 +28,8 @@
                     <button id="btnPlay" type="button" class="btn primary">⏸ Pausar</button>
                     <button id="btnStep" type="button" class="btn" title="Avanza un paso de física (S)">⏭ Paso</button>
                     <button id="btnReset" type="button" class="btn" title="Crea una Simulation nueva (R)">↺ Reset</button>
+                    <button id="btnKick0" type="button" class="btn" title="Chuta con el jugador 0 (F)">⚽ Chutar J0</button>
+                    <button id="btnKick1" type="button" class="btn" title="Chuta con el jugador 1 (Enter)">⚽ Chutar J1</button>
                 </div>
                 <label class="slider-row" for="speed">
                     <span>Pasos / frame: <strong id="speedVal">2</strong></span>
@@ -37,7 +39,10 @@
                     <label><input id="chkTrails" type="checkbox" checked /> Estela del balón</label>
                     <label><input id="chkCoords" type="checkbox" checked /> Coordenadas</label>
                 </div>
-                <p class="hint">Atajos: <kbd>Espacio</kbd> play/pausa · <kbd>S</kbd> paso · <kbd>R</kbd> reset</p>
+                <p class="hint">Mover: <kbd>WASD</kbd> jugador 0 · <kbd>←↑↓→</kbd> jugador 1 (en pausa, combina con Paso)</p>
+                <p class="hint">Chutar (a rango): <kbd>F</kbd> jugador 0 · <kbd>Enter</kbd> jugador 1</p>
+                <p class="hint" id="inputNote"></p>
+                <p class="hint">Atajos: <kbd>Espacio</kbd> play/pausa · <kbd>N</kbd> paso · <kbd>R</kbd> reset</p>
             </div>
 
             <div class="card">

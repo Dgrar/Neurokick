@@ -4,7 +4,7 @@ use rand::{Rng, RngExt};
 pub enum Activation {
     Sigmoid, // Para el Tiro (Salida 0.0 a 1.0)
     Tanh,    // Para el Movimiento X / Y (Salida -1.0 a 1.0)
-    Relu,    // Ideal para las capas internas ocultas
+    Relu,    // Capas internas ocultas
 }
 
 impl Activation {
@@ -17,7 +17,6 @@ impl Activation {
     }
 }
 
-// Ahora la topología define cuántas neuronas hay y qué activación usa cada una
 pub struct NeuronTopology {
     pub activation: Activation,
 }
@@ -115,9 +114,29 @@ pub struct Neuron {
 
 impl Neuron {
     pub fn random(rng: &mut dyn Rng, input_size: usize, activation: Activation) -> Neuron {
-        let bias = rng.random_range(-1.0..1.0);
+        let (limit_weight, limit_bias) = match activation {
+            Activation::Relu => {
+                // Kaiming/He initialization: raiz(2/(input_size))
+                // Compensa ReLu al forzar bias positivo
+                let limit = (2.0 / input_size as f32).sqrt();
+
+                (limit, 0.01)
+            }
+            Activation::Tanh | Activation::Sigmoid => {
+                // Xavier / Glorot Initialization: raiz(1/ input_size)
+                let limit: f32 = (1.0 / input_size as f32).sqrt();
+
+                (limit, limit)
+            }
+        };
+
+        let bias = if activation == Activation::Relu {
+            limit_bias // 0.01 constante para no matar neuronas con valores nulos
+        } else {
+            rng.random_range(-limit_bias..limit_bias)
+        };
         let weights = (0..input_size)
-            .map(|_| rng.random_range(-1.0..1.0))
+            .map(|_| rng.random_range(-limit_weight..limit_weight))
             .collect();
         Neuron {
             bias,
@@ -147,10 +166,10 @@ mod tests {
     fn random() {
         let mut rng = ChaCha8Rng::from_seed(Default::default());
         let neuron = Neuron::random(&mut rng, 4, Activation::Relu);
-        assert_relative_eq!(neuron.bias, -0.6255188);
+        assert_relative_eq!(neuron.bias, 0.01);
         assert_relative_eq!(
             neuron.weights.as_slice(),
-            vec![0.67383933, 0.81812596, 0.26284885, 0.5238805].as_ref()
+            vec![-0.44230857, 0.47647637, 0.57850236, 0.18586218].as_ref()
         )
     }
     #[test]
@@ -171,7 +190,7 @@ mod tests {
         println!("Network response: {:?}", result);
         assert_relative_eq!(
             result.as_slice(),
-            [-0.9740395, 0.99507874, 0.61351305].as_ref()
+            [-0.015621166, -0.65999174, 0.57196516].as_ref()
         );
     }
 }

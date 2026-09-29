@@ -12,14 +12,22 @@ const PLAYER_RESTITUTION: f32 = 0.8;
 const PLAYER_MASS: f32 = 120.0;
 const MAX_KICK_STRENGHT: f32 = 100.0;
 const SHOOT_RADIUS: f32 = 0.2;
+
+#[derive(Debug, PartialEq)]
+pub enum Team {
+    Blue,
+    Red,
+}
+
 pub struct Player {
     pub brain: Network,
-    // eye: el ojo
+    pub eye: Eye,
     pub physics: PhysicsComponent,
+    pub team: Team,
 }
 
 impl Player {
-    pub fn new(physics_world: &mut PhysicsWorld, pos: Point2<f32>) -> Player {
+    pub fn new(physics_world: &mut PhysicsWorld, pos: Point2<f32>, team: Team) -> Player {
         let topology = vec![
             LayerTopology::uniform_layer(12, Activation::Relu),
             LayerTopology::uniform_layer(12, Activation::Relu),
@@ -29,8 +37,11 @@ impl Player {
         let mut rng = rng();
 
         let brain = Network::random(&mut rng, 12, &topology);
+
+        let eye = Eye {};
         Player {
             brain,
+            eye,
             physics: PhysicsComponent::new_circular(
                 physics_world,
                 pos,
@@ -41,6 +52,7 @@ impl Player {
                 PLAYER_FRICTION,
                 PLAYER_DAMPING,
             ),
+            team,
         }
     }
 

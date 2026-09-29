@@ -56,10 +56,8 @@ pub struct EyeSensors {
 ### Capa de Salida (Actuadores Mecánicos)
 La capa final produce valores continuos evaluados mediante la función de activación **tangente hiperbólica (\(\tanh\))** en el rango `[-1.0, 1.0]`:
 
-*   **Fuerza X / Fuerza Y:** Magnitudes de empuje continuo aplicadas al motor físico multiplicadas por la constante `MAX_AGENT_FORCE`.
-*   **Acción de Chute:** Si la salida del gatillo es **superior a 0.7** y la pelota está dentro del radio físico de interacción, se dispara un impulso instantáneo.
-*   **Dirección del Chute:** Valor escalar mapeado linealmente al rango **`[-PI, PI]` radianes**. Determina el vector de fuerza aplicado al balón de manera independiente a la dirección de movimiento del jugador.
-
+*   **Fuerza X / Fuerza Y:** Magnitudes de empuje continuo aplicadas al motor físico multiplicadas por la constante `PLAYER_MAX_SPEED`.
+*   **Acción de Chute:** La potencia del chute estará limitada del **0 al 1**, para poder hacer que los jugadores puedan chutar fuertemente a porteria como hacer pases suaves.
 ---
 
 ## 3. Algoritmo Genético y Ciclo de Entrenamiento
@@ -106,3 +104,6 @@ Fomenta la interacción colectiva coordinando los jugadores de un mismo equipo y
 *   **Asistencia de Gol (`+15.0` puntos):** Otorgada al pasador si su compañero anota en un intervalo inferior a los siguientes 90 fotogramas (3.0 segundos) tras la recepción.
 *   **Bonificación de Gol Colectivo (`+20%`):** Multiplicador sobre el valor del gol si fue precedido por una combinación verificada de pases.
 *   **Penalización por Amontonamiento (`-0.05` puntos/s):** Se aplica si ambos compañeros están a una distancia menor a un radio crítico r sin que ninguno posea la posesión de la pelota, forzándolos a abrir el campo.
+
+### Fase Opcional: 5v5:
+Es el test definitivo por el que tiene que pasar la red neuronal, se mantienen mismas recompensas, se estudiará este caso para definir el exito del experimento

@@ -44,8 +44,8 @@ impl GameWorld {
             .insert_with_parent(west_wall, body_handle, &mut physics.bodies);
 
         let players = vec![
-            Player::new(&mut physics, Point2::new(-25.0, 0.0)),
-            Player::new(&mut physics, Point2::new(25.0, 0.0)),
+            Player::new(&mut physics, Point2::new(-25.0, 0.0), Team::Blue),
+            Player::new(&mut physics, Point2::new(25.0, 0.0), Team::Red),
         ];
 
         let ball = GameBall::new(&mut physics, Point2::new(0.0, 0.0));

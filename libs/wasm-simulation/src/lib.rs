@@ -32,6 +32,10 @@ impl Simulation {
     pub fn ball_radius(&self) -> f32 {
         sim::BALL_RADIUS
     }
+
+    pub fn apply_external_force(&mut self, idx: usize, fx: f32, fy: f32) {
+        self.sim.apply_external_force(idx, fx, fy);
+    }
 }
 
 #[wasm_bindgen]

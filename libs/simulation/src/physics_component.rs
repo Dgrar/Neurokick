@@ -57,6 +57,11 @@ impl PhysicsComponent {
         }
     }
 
+    pub fn reset_forces(&self, physics_world: &mut PhysicsWorld) {
+        let body = &mut physics_world.bodies[self.body_handle];
+        body.reset_forces(false);
+    }
+
     pub fn apply_force(&self, physics_world: &mut PhysicsWorld, fx: f32, fy: f32) {
         // Obtenemos el rigidbody de la lista de los rigidbodies del mundo físico
         let body = &mut physics_world.bodies[self.body_handle];
@@ -74,6 +79,12 @@ impl PhysicsComponent {
             // La aplicamos
             body.set_linvel(capped_vel, true);
         }
+    }
+
+    pub fn apply_impulse(&self, physics_world: &mut PhysicsWorld, fx: f32, fy: f32) {
+        let body = &mut physics_world.bodies[self.body_handle];
+        // Aplicamos el impulso
+        body.apply_impulse(Vec2 { x: fx, y: fy }, true);
     }
 
     // Funcion que devuelve la posicion

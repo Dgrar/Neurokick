@@ -7,6 +7,8 @@ mod player;
 
 use {ball::*, game_world::*, physics_component::*, player::*};
 
+use neural_network::{Activation, LayerTopology, Network};
+use rand::rng;
 use rapier2d::prelude::*;
 use std::f32::consts::PI;
 

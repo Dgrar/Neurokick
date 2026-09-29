@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+approx = "0.5.1"
+rand = "0.10.3"
+rand_chacha = "0.10.0"
+random = "0.14.1"

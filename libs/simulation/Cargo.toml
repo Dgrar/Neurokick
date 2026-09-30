@@ -9,3 +9,5 @@ rapier2d = "0.36.0"
 
 neural-network = {path="../neural-network"}
 rand = "0.10.3"
+getrandom = { version = "0.4", features = ["wasm_js"] }
+web-time = "1"

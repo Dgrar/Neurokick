@@ -57,9 +57,21 @@ impl GameWorld {
         }
     }
 
-    fn process_brains(&self) {
-        for player in self.players.iter() {
-            player.think()
+    fn process_brains(&mut self) {
+        for (i, player) in self.players.iter().enumerate() {
+            let otros_jugadores: Vec<&Player> = self.players[0..i]
+                .iter()
+                .chain(self.players[i + 1..].iter())
+                .collect();
+
+            player.think_and_act(
+                &mut self.physics,
+                Some(otros_jugadores),
+                &mut self.ball,
+                [-53.0, 0.0],
+                [53.0, 0.0],
+                [-53.0, 53.0, 34.5, -34.5],
+            );
         }
     }
 
@@ -67,8 +79,8 @@ impl GameWorld {
         self.physics.step();
         for player in self.players.iter() {
             player.physics.reset_forces(&mut self.physics);
-            self.process_brains();
         }
+        self.process_brains();
         self.ball.physics.reset_forces(&mut self.physics);
     }
 

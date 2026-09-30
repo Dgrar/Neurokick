@@ -13,11 +13,11 @@ impl Eye {
     pub fn see(
         &self,
         physics_world: &PhysicsWorld,
-        parent_player: Player,
-        other_players: Option<Vec<Player>>,
-        ball: GameBall,
-        own_goal_pos: f32,
-        enemy_goal_pos: f32,
+        parent_player: &Player,
+        other_players: Option<Vec<&Player>>,
+        ball: &GameBall,
+        own_goal_pos: [f32; 2],
+        enemy_goal_pos: [f32; 2],
         field_limits: [f32; 4],
     ) -> Vec<f32> {
         let mut inputs: Vec<f32> = Vec::new();
@@ -64,12 +64,19 @@ impl Eye {
 
         inputs.push(closest_enemy_pos[0]);
         inputs.push(closest_enemy_pos[1]);
+        // Dividimos para valores más pequeños y no saturar
+        inputs.push(enemy_goal_pos[0] / 53.0);
+        inputs.push(enemy_goal_pos[1] / 53.0);
+        inputs.push(own_goal_pos[0] / 34.0);
+        inputs.push(own_goal_pos[1] / 34.0);
 
-        inputs.push(enemy_goal_pos);
-        inputs.push(own_goal_pos);
+        // Limites del campo
+        inputs.push(field_limits[0] / 53.0);
+        inputs.push(field_limits[1] / 53.0);
+        inputs.push(field_limits[2] / 34.0);
+        inputs.push(field_limits[3] / 34.0);
         #[allow(unused_must_use)]
-        field_limits.map(|limit| inputs.push(limit));
-
+        // [ball_relative_x, ball_relative_y,teamate_x,closest_enemy_pos_x,closest_enemy_pos_y, posiciones de porterías (4) y de bordes (4) ]
         inputs
     }
 }

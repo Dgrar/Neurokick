@@ -143,6 +143,13 @@ dependencies = [
 [[package]]
 name = "genetic-algorithm"
 version = "0.1.0"
+dependencies = [
+ "approx",
+ "getrandom",
+ "rand",
+ "rand_chacha",
+ "random",
+]
 
 [[package]]
 name = "getrandom"

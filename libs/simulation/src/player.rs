@@ -33,8 +33,8 @@ pub struct Player {
 
 impl Player {
     pub fn new(physics_world: &mut PhysicsWorld, pos: Point2<f32>, team: Team) -> Player {
+        // Una sola capa oculta de 12 neuronas, si no aprenden se añaden más
         let topology = vec![
-            LayerTopology::uniform_layer(14, Activation::Relu),
             LayerTopology::uniform_layer(12, Activation::Relu),
             LayerTopology::output_layer(),
         ];

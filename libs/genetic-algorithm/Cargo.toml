@@ -9,3 +9,4 @@ rand = "0.10.3"
 rand_chacha = "0.10.0"
 random = "0.14.1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
+rayon = "1.12.0"

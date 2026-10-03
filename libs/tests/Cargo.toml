@@ -1,0 +1,11 @@
+[package]
+name = "test_integration"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+genetic-algorithm = { path = "../genetic-algorithm" }
+rand = "0.10.3"
+rand_chacha = "0.10.0"
+rayon = "1.12.0"
+approx = "0.5.1"

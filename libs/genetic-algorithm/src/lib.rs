@@ -1,11 +1,10 @@
-use rand::{Rng, RngExt, rng, seq::IndexedRandom};
+use rand::{Rng, RngExt, seq::IndexedRandom};
 
 pub struct GeneticAlgorithm<S> {
     selection_method: S,
     crossover_method: Box<dyn CrossoverMethod>,
     mutation_method: Box<dyn MutationMethod>,
 }
-
 pub trait Individual {
     fn create(genome: Vec<f32>) -> Self;
     fn fitness(&self) -> f32;
@@ -33,23 +32,52 @@ where
             mutation_method: Box::new(mutation_method),
         }
     }
-    pub fn evolve<I>(&self, rng: &mut dyn Rng, population: &[I]) -> Vec<I>
+    pub fn evolve<I>(&self, rng: &mut dyn Rng, population: &[I], k: usize) -> (Vec<I>, Stats)
     where
-        I: Individual,
+        I: Individual + Clone,
     {
         assert!(!population.is_empty());
+        assert!(
+            k <= population.len(),
+            "El elitismo (k) no puede superar el tamaño de la población"
+        );
 
-        (0..population.len())
-            .map(|_| {
-                let parent_a = self.selection_method.select(rng, population).genome();
-                let parent_b = self.selection_method.select(rng, population).genome();
+        let target_size = population.len();
+        let mut next_generation: Vec<I> = Vec::with_capacity(target_size);
 
-                let mut child = self.crossover_method.cross(rng, &parent_a, &parent_b);
-                self.mutation_method.mutate(rng, &mut child);
+        if k > 0 {
+            let mut old_population = population.to_vec();
 
-                I::create(child)
-            })
-            .collect()
+            old_population.select_nth_unstable_by(k - 1, |a, b| {
+                b.fitness()
+                    .partial_cmp(&a.fitness())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            next_generation.extend(old_population.into_iter().take(k));
+        }
+
+        let remaining_slots = target_size - k;
+        let offspring = (0..remaining_slots).map(|_| {
+            let parent_a = self.selection_method.select(rng, population).genome();
+            let parent_b = self.selection_method.select(rng, population).genome();
+
+            let mut child = self.crossover_method.cross(rng, parent_a, parent_b);
+            self.mutation_method.mutate(rng, &mut child);
+
+            I::create(child)
+        });
+        next_generation.extend(offspring);
+
+        next_generation.sort_by(|a, b| {
+            b.fitness()
+                .partial_cmp(&a.fitness())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let stats = Stats::new(&next_generation);
+
+        (next_generation, stats)
     }
 }
 #[derive(Debug)]
@@ -63,6 +91,38 @@ impl SelectionMethod for RouletteSelection {
         individuals
             .choose_weighted(rng, |individual| individual.fitness())
             .expect("No se ha podido escoger")
+    }
+}
+
+pub struct TournamentSelection {
+    pub tournament_size: usize,
+}
+
+impl TournamentSelection {
+    pub fn new(tournament_size: usize) -> TournamentSelection {
+        TournamentSelection { tournament_size }
+    }
+}
+
+impl SelectionMethod for TournamentSelection {
+    fn select<'a, I>(&self, rng: &mut dyn Rng, individuals: &'a [I]) -> &'a I
+    where
+        I: Individual,
+    {
+        assert!(self.tournament_size > 0, "No puede haber torneos vacíos");
+        assert!(!individuals.is_empty(), "La población no puede estar vacía");
+        (0..self.tournament_size)
+            .map(|_| {
+                individuals
+                    .choose(rng)
+                    .expect("Error al elegir un individuo")
+            })
+            .max_by(|a, b| {
+                a.fitness()
+                    .partial_cmp(&b.fitness())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("No se ha podido elegir un ganador")
     }
 }
 
@@ -84,6 +144,42 @@ impl CrossoverMethod for UniformCrossover {
     }
 }
 
+pub struct ArithmeticCrossover {
+    // Alpha tiene que estar entre 0 y 1, es la proporcion de weight de cada uno que se lleva el gen
+    alpha: f32,
+}
+
+impl ArithmeticCrossover {
+    pub fn new(alpha: f32) -> ArithmeticCrossover {
+        ArithmeticCrossover { alpha }
+    }
+}
+
+impl CrossoverMethod for ArithmeticCrossover {
+    fn cross(&self, rng: &mut dyn Rng, parent_a: &[f32], parent_b: &[f32]) -> Vec<f32> {
+        assert_eq!(parent_a.len(), parent_b.len());
+        parent_a
+            .iter()
+            .zip(parent_b)
+            .map(|(a, b)| a * self.alpha + b * (1.0 - self.alpha))
+            .collect()
+    }
+}
+
+pub struct RandomArithmeticCrossover;
+
+impl CrossoverMethod for RandomArithmeticCrossover {
+    fn cross(&self, rng: &mut dyn Rng, parent_a: &[f32], parent_b: &[f32]) -> Vec<f32> {
+        assert_eq!(parent_a.len(), parent_b.len());
+        let alpha: f32 = rng.random();
+        parent_a
+            .iter()
+            .zip(parent_b)
+            .map(|(a, b)| a * alpha + b * (1.0 - alpha))
+            .collect()
+    }
+}
+
 pub trait MutationMethod {
     fn mutate(&self, rng: &mut dyn Rng, child: &mut Vec<f32>);
 }
@@ -95,7 +191,7 @@ pub struct GaussianMutation {
 
 impl GaussianMutation {
     pub fn new(chance: f32, coefficient: f32) -> Self {
-        assert!(chance >= 0.0 && chance <= 1.0);
+        assert!(chance > 0.0 && chance <= 1.0);
         Self {
             chance,
             coefficient,
@@ -114,6 +210,41 @@ impl MutationMethod for GaussianMutation {
         }
     }
 }
+
+pub struct Stats {
+    pub min_fitness: f32,
+    pub max_fitness: f32,
+    pub avg_fitness: f32,
+}
+
+impl Stats {
+    pub fn new<I>(population: &[I]) -> Stats
+    where
+        I: Individual,
+    {
+        assert!(!population.is_empty());
+        let mut min_fitness = population[0].fitness();
+        let mut max_fitness = min_fitness;
+        let mut sum_fitness = 0.0;
+
+        for individual in population {
+            if individual.fitness() > max_fitness {
+                max_fitness = individual.fitness();
+            }
+            if individual.fitness() < min_fitness {
+                min_fitness = individual.fitness();
+            }
+            sum_fitness += individual.fitness();
+        }
+
+        Stats {
+            min_fitness,
+            max_fitness,
+            avg_fitness: sum_fitness / population.len() as f32,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -177,7 +308,7 @@ mod tests {
         assert_eq!(actual_histogram, expected_histogram);
     }
     #[test]
-    fn test_crossover_method() {
+    fn test_cross_entropy_crossover_method() {
         let mut rng = ChaCha8Rng::from_seed(Default::default());
         let parent_a = TestIndividual::create(vec![0.0, 0.12, 1.1, 0.2]);
         let parent_b = TestIndividual::create(vec![0.32, 0.42, 0.9, 0.67]);
@@ -187,6 +318,26 @@ mod tests {
         let expected_genome = vec![0.32, 0.42, 1.1, 0.2];
 
         assert_eq!(child_genes, expected_genome)
+    }
+    #[test]
+    fn test_arithmetic_crossover_method() {
+        let mut rng = ChaCha8Rng::from_seed(Default::default());
+
+        let parent_a = vec![1.0, 2.0, 3.0, 4.0];
+        let parent_b = vec![0.0, 0.0, 0.0, 0.0];
+
+        let crossover = ArithmeticCrossover { alpha: 0.5 };
+        let child_genes = crossover.cross(&mut rng, &parent_a, &parent_b);
+
+        let expected_genome = vec![0.5, 1.0, 1.5, 2.0];
+
+        assert_eq!(child_genes, expected_genome);
+
+        let crossover_weighted = ArithmeticCrossover { alpha: 0.75 };
+        let child_genes_weighted = crossover_weighted.cross(&mut rng, &parent_a, &parent_b);
+
+        let expected_weighted = vec![0.75, 1.5, 2.25, 3.0];
+        assert_eq!(child_genes_weighted, expected_weighted);
     }
 
     mod test_mutation_method {

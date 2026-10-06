@@ -83,6 +83,7 @@ impl Player {
                 .apply_impulse(physics_world, shooting_vector.x, shooting_vector.y);
         }
     }
+
     pub fn think_and_act(
         &self,
         physics_world: &mut PhysicsWorld,
@@ -110,5 +111,13 @@ impl Player {
         );
 
         self.kick(physics_world, ball, responses[2]);
+    }
+
+    pub fn show_genome(&self) -> (usize, Vec<usize>, Vec<f32>) {
+        (
+            self.brain.input_size(),
+            self.brain.layer_sizes(),
+            self.brain.to_genome(),
+        )
     }
 }

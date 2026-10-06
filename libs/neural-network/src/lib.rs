@@ -87,6 +87,36 @@ impl Network {
         genome
     }
 
+    // Tamaño capa de entrada
+    pub fn input_size(&self) -> usize {
+        self.layers
+            .first()
+            .and_then(|l| l.neurons.first())
+            .map(|n| n.weights.len())
+            .unwrap_or(0)
+    }
+
+    // Numero de neuronas por capa
+    pub fn layer_sizes(&self) -> Vec<usize> {
+        self.layers.iter().map(|l| l.neurons.len()).collect()
+    }
+
+    // Biases por cada capa
+    pub fn biases(&self) -> Vec<Vec<f32>> {
+        self.layers
+            .iter()
+            .map(|l| l.neurons.iter().map(|n| n.bias).collect())
+            .collect()
+    }
+
+    // Weights por cada capa
+    pub fn weights(&self) -> Vec<Vec<Vec<f32>>> {
+        self.layers
+            .iter()
+            .map(|l| l.neurons.iter().map(|n| n.weights.clone()).collect())
+            .collect()
+    }
+
     pub fn from_genome(
         inputs_size: usize,
         layers_topology: &[LayerTopology],
@@ -175,7 +205,7 @@ impl Neuron {
         let bias = if activation == Activation::Relu {
             limit_bias
         } else {
-            rng.random_range(-limit_bias..limit_bias) // Corrección: API moderna de rand
+            rng.random_range(-limit_bias..limit_bias)
         };
 
         let weights = (0..input_size)

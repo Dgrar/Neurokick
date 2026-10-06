@@ -4,7 +4,8 @@ use crate::*;
 
 pub struct PhysicsComponent {
     // El handle permite acceder al cuerpo mediante (world.getRigidBody(body_handle))
-    body_handle: RigidBodyHandle,
+    pub body_handle: RigidBodyHandle,
+    pub collider_handle: ColliderHandle,
     mass: f32,
     max_speed: f32,
     linear_damping: f32, // Fricción
@@ -43,7 +44,7 @@ impl PhysicsComponent {
             .build();
 
         // Obtenemos el handle del collider, pero asociado al RigidBody de antes
-        physics_world.colliders.insert_with_parent(
+        let collider_handle = physics_world.colliders.insert_with_parent(
             collider,                  // Queremos el collider
             body_handle,               // El RigidBody padre del collider
             &mut physics_world.bodies, // La lista de los cuerpos del mundo (Mutable)
@@ -51,6 +52,7 @@ impl PhysicsComponent {
 
         Self {
             body_handle,
+            collider_handle,
             mass,
             max_speed,
             linear_damping,
@@ -99,5 +101,17 @@ impl PhysicsComponent {
         let body = &physics_world.bodies[self.body_handle];
         let velocity = body.linvel();
         [velocity[0], velocity[1]]
+    }
+
+    pub fn reset(&mut self, physics_world: &mut PhysicsWorld, pos_x: f32, pos_y: f32) {
+        let body = physics_world.bodies.get_mut(self.body_handle).unwrap();
+
+        body.set_position(
+            Pose2 {
+                rotation: Rot2 { re: 0.0, im: 0.0 },
+                translation: Vec2 { x: pos_x, y: pos_y },
+            },
+            true,
+        );
     }
 }

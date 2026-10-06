@@ -17,6 +17,14 @@
 
     <main class="layout">
         <section class="pitch-wrap">
+            <div id="scoreboard" class="scoreboard" aria-label="Marcador">
+                <span class="team local">LOCAL</span>
+                <span id="scoreLocal" class="score">0</span>
+                <span class="sep">–</span>
+                <span id="scoreAway" class="score">0</span>
+                <span class="team away">VISITANTE</span>
+                <span id="goalFlash" class="goal-flash" hidden>¡GOL!</span>
+            </div>
             <canvas id="pitch" aria-label="Campo de fútbol con jugadores y balón"></canvas>
             <div id="loadError" class="load-error" hidden></div>
         </section>
@@ -47,6 +55,7 @@
                     <div><dt>FPS</dt><dd id="stFps">—</dd></div>
                     <div><dt>Modo</dt><dd id="stMode">…</dd></div>
                     <div><dt>Jugadores</dt><dd id="stPlayers">—</dd></div>
+                    <div><dt>Marcador</dt><dd id="stScore">0 – 0</dd></div>
                 </dl>
                 <pre id="stPos" class="positions">esperando datos…</pre>
             </div>
@@ -57,8 +66,17 @@
                     <li><span class="dot dot-p0"></span> Jugador 0 (equipo A)</li>
                     <li><span class="dot dot-p1"></span> Jugador 1+ (equipo B / siguientes)</li>
                     <li><span class="dot dot-ball"></span> Balón + estela</li>
+                    <li><span class="dot dot-focus"></span> Jugador enfocado (clic en campo)</li>
                 </ul>
 
+            </div>
+
+            <div class="card">
+                <h2>Cerebro · <span id="genomeTitle">jugador 0</span></h2>
+                <div id="focusRow" class="btn-row" role="group" aria-label="Enfocar jugador"></div>
+                <canvas id="genome" aria-label="Dibujo de la red neuronal del jugador enfocado"></canvas>
+                <pre id="genomeInfo" class="positions">sin datos…</pre>
+                <p class="hint">Verde = peso +, rojo = peso − (grosor = magnitud). El número bajo cada nodo es su <em>bias</em>. Clic en un jugador del campo para enfocarlo.</p>
             </div>
         </aside>
     </main>

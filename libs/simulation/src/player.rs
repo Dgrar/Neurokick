@@ -16,6 +16,7 @@ const PLAYER_MASS: f32 = 120.0;
 const MAX_KICK_STRENGHT: f32 = 20.0;
 const SHOOT_RADIUS: f32 = 2.0;
 const MAX_AGENT_FORCE: f32 = 400.0;
+const SHOOT_COOLDOWN: u64 = 1;
 
 #[derive(Debug, PartialEq)]
 pub enum Team {
@@ -28,7 +29,9 @@ pub struct Player {
     pub eye: Eye,
     pub physics: PhysicsComponent,
     pub team: Team,
-    last_shot: Cell<Instant>,
+    pub fitness: f32,
+    pub prev_ball_distance: Option<f32>,
+    last_shot_frame: u64,
 }
 
 impl Player {
@@ -58,15 +61,24 @@ impl Player {
                 PLAYER_DAMPING,
             ),
             team,
-            last_shot: Cell::new(Instant::now()),
+            fitness: 0.0,
+            prev_ball_distance: None,
+            last_shot_frame: 0,
         }
     }
 
-    pub fn kick(&self, physics_world: &mut PhysicsWorld, ball: &mut GameBall, power: f32) {
-        if self.last_shot.get().elapsed() < Duration::from_secs_f64(1.5) {
+    pub fn kick(
+        &mut self,
+        physics_world: &mut PhysicsWorld,
+        ball: &mut GameBall,
+        power: f32,
+        current_frame: u64,
+    ) {
+        if current_frame - self.last_shot_frame < SHOOT_COOLDOWN {
             return;
         }
-        self.last_shot.set(Instant::now());
+
+        self.last_shot_frame = current_frame;
         let position: Vec2 = self.physics.position(physics_world).into();
         let ball_position: Vec2 = ball.physics.position(physics_world).into();
 
@@ -83,15 +95,16 @@ impl Player {
                 .apply_impulse(physics_world, shooting_vector.x, shooting_vector.y);
         }
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn think_and_act(
-        &self,
+        &mut self,
         physics_world: &mut PhysicsWorld,
         other_players: Option<Vec<&Player>>,
         ball: &mut GameBall,
         own_goal_pos: [f32; 2],
         enemy_goal_pos: [f32; 2],
         field_limits: [f32; 4],
+        current_frame: u64,
     ) {
         let inputs = self.eye.see(
             physics_world,
@@ -104,13 +117,17 @@ impl Player {
         );
         let responses = self.brain.propagate(inputs.as_slice());
 
+        self.prev_ball_distance =
+            Some(self.get_distance_to(ball.physics.position(physics_world), physics_world));
+
         self.physics.apply_force(
             physics_world,
             responses[0] * MAX_AGENT_FORCE,
             responses[1] * MAX_AGENT_FORCE,
         );
-
-        self.kick(physics_world, ball, responses[2]);
+        if responses[2] != 0.0 {
+            self.kick(physics_world, ball, responses[2], current_frame);
+        }
     }
 
     pub fn show_genome(&self) -> (usize, Vec<usize>, Vec<f32>) {
@@ -119,5 +136,10 @@ impl Player {
             self.brain.layer_sizes(),
             self.brain.to_genome(),
         )
+    }
+
+    pub fn get_distance_to(&self, other_position: [f32; 2], physics_world: &PhysicsWorld) -> f32 {
+        let position: Vec2 = self.physics.position(physics_world).into();
+        position.distance(other_position.into())
     }
 }

@@ -10,13 +10,24 @@ pub const FIELD_HALF_HEIGHT: f32 = 34.5;
 pub const GOAL_HALF_HEIGHT: f32 = 5.5;
 pub const GOAL_DEPTH: f32 = 4.0;
 
+pub enum Mode {
+    Exploration,
+    Competition,
+    Cooperation,
+    FinalTest,
+}
+
 pub struct GameWorld {
     pub physics: PhysicsWorld,
     pub players: Vec<Player>,
     pub ball: GameBall,
     pub local_goals: u32,
     pub away_goals: u32,
+    pub mode: Mode,
     goals: [ColliderHandle; 2],
+    last_touch_index: Option<u32>,
+    frame: u64,
+    prev_ball_vel: [f32; 2],
 }
 
 impl GameWorld {
@@ -98,7 +109,15 @@ impl GameWorld {
             local_goals: 0,
             away_goals: 0,
             goals: [left_goal_handle, right_goal_handle],
+            mode: Mode::Exploration,
+            last_touch_index: None,
+            frame: 0,
+            prev_ball_vel: [0.0, 0.0],
         }
+    }
+
+    pub fn dt(&self) -> f32 {
+        self.physics.integration_parameters.dt
     }
 
     pub fn reset(&mut self) {
@@ -120,26 +139,44 @@ impl GameWorld {
     }
 
     fn process_brains(&mut self) {
-        for (i, player) in self.players.iter().enumerate() {
-            let otros_jugadores: Vec<&Player> = self.players[0..i]
-                .iter()
-                .chain(self.players[i + 1..].iter())
-                .collect();
+        for i in 0..self.players.len() {
+            let (before, rest) = self.players.split_at_mut(i);
+            let (player, after) = rest
+                .split_first_mut()
+                .expect("El indice siempre esta dentro del vec");
+
+            let otros_jugadores: Vec<&Player> = before.iter().chain(after.iter()).collect();
+
+            let (own_goal_pos, enemy_goal_pos) = match player.team {
+                Team::Blue => ([-FIELD_HALF_WIDTH, 0.0], [FIELD_HALF_WIDTH, 0.0]),
+                Team::Red => ([FIELD_HALF_WIDTH, 0.0], [-FIELD_HALF_WIDTH, 0.0]),
+            };
 
             player.think_and_act(
                 &mut self.physics,
                 Some(otros_jugadores),
                 &mut self.ball,
-                [-53.0, 0.0],
-                [53.0, 0.0],
-                [-53.0, 53.0, 34.5, -34.5],
+                own_goal_pos,
+                enemy_goal_pos,
+                [
+                    -FIELD_HALF_WIDTH,
+                    FIELD_HALF_WIDTH,
+                    FIELD_HALF_HEIGHT,
+                    -FIELD_HALF_HEIGHT,
+                ],
+                self.frame,
             );
         }
     }
 
     pub fn step(&mut self) {
+        self.prev_ball_vel = self.ball.physics.velocity(&self.physics);
+        self.frame = self.frame.wrapping_add(1);
+
         self.physics.step();
         self.check_goals();
+        self.check_touches();
+        self.calculate_fitness();
         for player in self.players.iter() {
             player.physics.reset_forces(&mut self.physics);
         }
@@ -157,9 +194,6 @@ impl GameWorld {
         self.players.len()
     }
 
-    /// Devuelve el cerebro del jugador `idx`: (tamaño entrada, tamaños por
-    /// capa, genoma plano [bias, w0, w1, ...] por neurona).
-    /// Reutiliza el `show_genome()` del `Player`.
     pub fn show_genome(&self, idx: usize) -> Option<(usize, Vec<usize>, Vec<f32>)> {
         self.players.get(idx).map(|p| {
             let (input_size, layer_sizes, genome) = p.show_genome();
@@ -176,14 +210,74 @@ impl GameWorld {
                 .intersection_pair(*goal, ball_collider)
                 == Some(true)
             {
+                // Azul derecha rojo izquierda
                 if i == 0 {
-                    self.local_goals += 1
+                    self.local_goals += 1;
+                    let p_i = self.last_touch_index.unwrap_or(10000000);
+
+                    if let Some(player) = self.players.get_mut(p_i as usize) {
+                        player.fitness += if player.team == Team::Red {
+                            -50.0
+                        } else {
+                            50.0
+                        };
+                    }
                 } else {
-                    self.away_goals += 1
+                    self.away_goals += 1;
+                    let p_i = self.last_touch_index.unwrap_or(10000000);
+
+                    if let Some(player) = self.players.get_mut(p_i as usize) {
+                        player.fitness += if player.team == Team::Red {
+                            50.0
+                        } else {
+                            -50.0
+                        };
+                    }
                 }
                 self.reset();
                 break;
             }
+        }
+    }
+
+    pub fn check_touches(&mut self) {
+        let mut has_player_touched = false;
+        for (i, player) in self.players.iter().enumerate() {
+            let player_collider = self
+                .physics
+                .colliders
+                .get(self.ball.physics.collider_handle)
+                .unwrap();
+            if let Some(contact) = self.physics.narrow_phase.contact_pair(
+                self.ball.physics.collider_handle,
+                player.physics.collider_handle,
+            ) {
+                if contact.has_any_active_contact() {
+                    if has_player_touched == false {
+                        self.last_touch_index = Some(i as u32);
+                        continue;
+                    }
+                    self.last_touch_index = None;
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn calculate_fitness(&mut self) {
+        let fitness_function = match self.mode {
+            Mode::Exploration => ExplorationFitness::default(),
+            Mode::Competition => ExplorationFitness::default(),
+            Mode::Cooperation => ExplorationFitness::default(),
+            Mode::FinalTest => ExplorationFitness::default(),
+        };
+        for player in self.players.iter_mut() {
+            player.fitness += fitness_function.add_by_situation(
+                player,
+                &self.ball,
+                &self.physics,
+                [self.away_goals, self.local_goals],
+            );
         }
     }
 

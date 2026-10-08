@@ -640,11 +640,13 @@ dependencies = [
 name = "simulation"
 version = "0.1.0"
 dependencies = [
+ "genetic-algorithm",
  "getrandom",
  "nalgebra",
  "neural-network",
  "rand",
  "rapier2d",
+ "rayon",
  "web-time",
 ]
 

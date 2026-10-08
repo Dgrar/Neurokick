@@ -5,6 +5,9 @@ use std::default::Default;
 //*   **Chute orientado (`+5.0` puntos):** Incremento de velocidad de la pelota si el vector resultante se dirige al campo rival.
 //*   **Anotación de Gol (`+50.0` puntos):** Máxima recompensa instantánea de la fase.
 //*   **Penalización por Inactividad (`-0.01` puntos/s):** Aplicada si el jugador o el balón permanecen estáticos.
+
+const INACTIVITY_MIN_MOVEMENT: f32 = 2.0;
+
 pub struct ExplorationFitness {
     per_distance: f32,
     per_goal: f32,
@@ -33,6 +36,8 @@ impl Default for ExplorationFitness {
         }
     }
 }
+// Se llama una vez por segundo
+
 impl FitnessFunction for ExplorationFitness {
     fn add_by_situation(
         &self,
@@ -49,6 +54,13 @@ impl FitnessFunction for ExplorationFitness {
 
         new_fitness += self.per_distance
             * (new_player_distance - player.prev_ball_distance.unwrap_or(new_player_distance));
+
+        // Quedarse quieto
+        if new_player_distance - player.prev_ball_distance.unwrap_or(new_player_distance)
+            < INACTIVITY_MIN_MOVEMENT
+        {
+            new_fitness -= self.per_inactivity;
+        }
 
         new_fitness
     }

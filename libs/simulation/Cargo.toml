@@ -8,6 +8,9 @@ nalgebra = "0.35.0"
 rapier2d = "0.36.0"
 
 neural-network = {path="../neural-network"}
+genetic-algorithm = {path="../genetic-algorithm"}
 rand = "0.10.3"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 web-time = "1"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1.12.0"

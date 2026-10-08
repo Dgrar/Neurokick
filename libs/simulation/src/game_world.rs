@@ -1,6 +1,11 @@
 use std::ops::Div;
 
-use crate::*;
+use rand::rng;
+// Navegador no ejecuta funciones por debajo, solo ejecuta una simulación elegida
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+use crate::{player_individual::PlayerIndividual, *};
 use nalgebra::Point2;
 
 // Medidas del campo (línea de gol a línea de gol / banda a banda).
@@ -10,6 +15,7 @@ pub const FIELD_HALF_HEIGHT: f32 = 34.5;
 pub const GOAL_HALF_HEIGHT: f32 = 5.5;
 pub const GOAL_DEPTH: f32 = 4.0;
 
+#[derive(Debug)]
 pub enum Mode {
     Exploration,
     Competition,
@@ -176,7 +182,10 @@ impl GameWorld {
         self.physics.step();
         self.check_goals();
         self.check_touches();
-        self.calculate_fitness();
+        if self.frame as f32 % (1.0 / self.dt()) == 0.0 {
+            self.add_situation_fitness();
+        }
+        self.add_situation_fitness();
         for player in self.players.iter() {
             player.physics.reset_forces(&mut self.physics);
         }
@@ -264,7 +273,7 @@ impl GameWorld {
         }
     }
 
-    pub fn calculate_fitness(&mut self) {
+    pub fn add_situation_fitness(&mut self) {
         let fitness_function = match self.mode {
             Mode::Exploration => ExplorationFitness::default(),
             Mode::Competition => ExplorationFitness::default(),
@@ -292,6 +301,28 @@ impl GameWorld {
             score: [self.away_goals, self.local_goals],
         }
     }
+
+    pub fn from_genome_same_mode(&mut self, genome: Vec<Vec<f32>>) {
+        assert_eq!(genome.len(), self.players.len());
+
+        for (i, player) in self.players.iter_mut().enumerate() {
+            player.from_genome(&genome[i]);
+        }
+    }
+
+    pub fn from_genome_change_mode(&mut self, genome: Vec<Vec<f32>>) {
+        assert_eq!(genome.len(), self.players.len());
+
+        for i in 0..self.players.len() {
+            if let Some(genes) = genome.get(i) {
+                self.players[i].from_genome(genes);
+            } else {
+                self.players[i].random_brain()
+            }
+        }
+    }
+
+    pub fn bunch_train(&mut self, epochs: usize) {}
 }
 
 #[derive(Clone, Debug)]
@@ -299,4 +330,33 @@ pub struct GameData {
     pub player_positions: Vec<[f32; 2]>,
     pub ball_position: [f32; 2],
     pub score: [u32; 2],
+}
+
+use rayon::prelude::*;
+
+pub fn simulate_bunch(mode: Mode, sim_num: usize, epochs: u32) {
+    let population: Vec<PlayerIndividual> = (0..sim_num)
+        .into_par_iter()
+        .flat_map(|_| {
+            let mut game = GameWorld::new(PhysicsWorld::new());
+            for _ in 0..epochs {
+                game.step();
+            }
+
+            game.players
+                .into_iter()
+                .map(|player| PlayerIndividual::from_player(player))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let genetic_algorithm = GeneticAlgorithm::new(
+        TournamentSelection::new(3),
+        ArithmeticCrossover::new(0.5),
+        GaussianMutation::new(0.25, 0.3),
+    );
+
+    let mut rng = rng();
+
+    let sons = genetic_algorithm.evolve(&mut rng, &population, 3);
 }

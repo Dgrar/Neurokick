@@ -1,8 +1,5 @@
-use std::{cell::Cell, time::Duration};
-use web_time::Instant;
-
 use nalgebra::Point2;
-use neural_network::{Activation, LayerTopology, Network};
+use neural_network::*;
 use rand::{RngExt, rng};
 
 use crate::*;
@@ -95,6 +92,7 @@ impl Player {
                 .apply_impulse(physics_world, shooting_vector.x, shooting_vector.y);
         }
     }
+
     #[allow(clippy::too_many_arguments)]
     pub fn think_and_act(
         &mut self,
@@ -141,5 +139,24 @@ impl Player {
     pub fn get_distance_to(&self, other_position: [f32; 2], physics_world: &PhysicsWorld) -> f32 {
         let position: Vec2 = self.physics.position(physics_world).into();
         position.distance(other_position.into())
+    }
+
+    pub fn from_genome(&mut self, genome: &[f32]) {
+        let topology = vec![
+            LayerTopology::uniform_layer(12, Activation::Relu),
+            LayerTopology::output_layer(),
+        ];
+        self.brain = Network::from_genome(14, &topology, genome.to_vec())
+    }
+
+    pub fn random_brain(&mut self) {
+        let topology = vec![
+            LayerTopology::uniform_layer(12, Activation::Relu),
+            LayerTopology::output_layer(),
+        ];
+
+        let mut rng = rng();
+
+        self.brain = Network::random(&mut rng, 14, &topology);
     }
 }

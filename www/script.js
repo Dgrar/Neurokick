@@ -45,6 +45,9 @@ class MockSimulation {
     train() {this.#step();}
     visualize() {
         this.#step();
+        return this.show_positions();
+    }
+    show_positions() {
         return {
             players: [{x: this.px, y: this.py}],
             ball: {x: this.bx, y: this.by},
@@ -52,6 +55,8 @@ class MockSimulation {
             away_goals: this.away_goals,
         };
     }
+    get_fitness() {return 0;}
+    from_genome(idx, genome) {this._genomes = this._genomes || new Map(); this._genomes.set(idx, Array.from(genome ?? []));}
     player_radius() {return vis.playerR;}
     ball_radius() {return vis.ballR;}
     field_half_width() {return FIELD.w / 2;}
@@ -93,12 +98,12 @@ class MockSimulation {
         const gh = FIELD.goalWidth / 2;
         const inMouth = Math.abs(this.by) < gh;
         // Gol: cruza la línea dentro del hueco.
-        if (this.bx > hx && inMouth) { this.away_goals++; this.bx = 0; this.by = 0; this.bvx = -2.5; this.bvy = 1.2; }
-        else if (this.bx < -hx && inMouth) { this.local_goals++; this.bx = 0; this.by = 0; this.bvx = 2.5; this.bvy = -1.2; }
-        if (this.bx > hx) { this.bx = hx; this.bvx *= -0.6; }
-        if (this.bx < -hx) { this.bx = -hx; this.bvx *= -0.6; }
-        if (this.by > hy) { this.by = hy; this.bvy *= -0.6; }
-        if (this.by < -hy) { this.by = -hy; this.bvy *= -0.6; }
+        if (this.bx > hx && inMouth) {this.away_goals++; this.bx = 0; this.by = 0; this.bvx = -2.5; this.bvy = 1.2;}
+        else if (this.bx < -hx && inMouth) {this.local_goals++; this.bx = 0; this.by = 0; this.bvx = 2.5; this.bvy = -1.2;}
+        if (this.bx > hx) {this.bx = hx; this.bvx *= -0.6;}
+        if (this.bx < -hx) {this.bx = -hx; this.bvx *= -0.6;}
+        if (this.by > hy) {this.by = hy; this.bvy *= -0.6;}
+        if (this.by < -hy) {this.by = -hy; this.bvy *= -0.6;}
         const dx = this.bx - this.px, dy = this.by - this.py;
         const d = Math.hypot(dx, dy) || 1e-6;
         if (d < vis.playerR + vis.ballR + 0.1) {
@@ -112,6 +117,18 @@ class MockSimulation {
 }
 
 // ---------------------------------------------------------------- carga wasm
+
+// Módulo wasm ya importado, para poder crear partidas nuevas sin reimportar.
+let wasmModule = null;
+
+// Crea una Simulation nueva (partido en blanco: posiciones, balón, marcador y
+// fitness a cero). Se usa al reiniciar con nuevos cerebros.
+function createFreshSim() {
+    if (wasmModule && typeof wasmModule.Simulation === "function") {
+        return {sim: new wasmModule.Simulation(), mode: "WASM REAL"};
+    }
+    return {sim: new MockSimulation(), mode: app.mode || "MOCK"};
+}
 
 // Lee los radios físicos del sim (wasm o mock) para dibujar a escala real.
 function readRadii(sim) {
@@ -136,6 +153,7 @@ async function loadSimulation() {
     const mark = (ok, msg) => {diag.push((ok ? "OK  " : "FALLO ") + msg); console.log("[neurokick]", diag[diag.length - 1]);};
     try {
         const mod = await import("./pkg/wasm_simulation.js");
+        wasmModule = mod;
         mark(true, "pkg/wasm_simulation.js importado (exports: " + Object.keys(mod).join(", ") + ")");
         // El glue actual es síncrono (sin export default); la guarda cubre
         // variantes del glue que sí requieren init().
@@ -151,6 +169,12 @@ async function loadSimulation() {
             mark(true, "visualize() -> " + probe.players.length + " jugador(es), balon (" +
                 probe.ball.x.toFixed(2) + ", " + probe.ball.y.toFixed(2) + ")" +
                 " marcador " + (probe.local_goals ?? 0) + "-" + (probe.away_goals ?? 0));
+            // Se liberan también los wrappers de players/ball: son punteros
+            // del externref table y quedarían zombis.
+            try {
+                for (const p of probe.players ?? []) if (p && typeof p.free === "function") p.free();
+                if (probe.ball && typeof probe.ball.free === "function") probe.ball.free();
+            } catch {}
             if (typeof probe.free === "function") probe.free();
             readRadii(sim);
             readFieldDims(sim);
@@ -172,16 +196,31 @@ async function loadSimulation() {
 }
 
 // Normaliza Data (wasm o mock) a { players, ball, local_goals, away_goals }.
+//
+// IMPORTANTE: los getters del glue se llaman UNA sola vez y se guardan en
+// variables. `Data.players` es `getter_with_clone`: cada acceso crea wrappers
+// JS NUEVOS sobre los punteros del externref table. Si se lee dos veces, la
+// segunda tanda de wrappers queda huérfana (nunca se libera) y sus punteros
+// se reciclan: el siguiente snapshot lee posiciones corruptas y el dibujo se
+// va al vacío. `Data.ball` también se mueve fuera del struct, por lo que un
+// segundo acceso devolvería un puntero ya liberado.
 function snapshot(data) {
-    const players = Array.from(data.players ?? [], (p) => ({x: p.x, y: p.y}));
-    const ball = {x: data.ball.x, y: data.ball.y};
+    let rawPlayers = [];
+    let rawBall = null;
+    try {
+        rawPlayers = data.players ?? [];
+        rawBall = data.ball;
+    } catch { /* mock antiguo: se construye a mano */ }
+
+    const players = Array.from(rawPlayers ?? [], (p) => ({x: p.x, y: p.y}));
+    const ball = {x: rawBall ? rawBall.x : 0, y: rawBall ? rawBall.y : 0};
     const local_goals = Number(data.local_goals ?? 0);
     const away_goals = Number(data.away_goals ?? 0);
     try {
-        for (const p of data.players ?? []) if (p && typeof p.free === "function") p.free();
-        if (data.ball && typeof data.ball.free === "function") data.ball.free();
+        for (const p of rawPlayers ?? []) if (p && typeof p.free === "function") p.free();
+        if (rawBall && typeof rawBall.free === "function") rawBall.free();
         if (typeof data.free === "function") data.free();
-    } catch { /* los objetos mock no tienen free(); sin problema */}
+    } catch { /* los objetos mock no tienen free(); sin problema */ }
     return {players, ball, local_goals, away_goals};
 }
 
@@ -455,6 +494,11 @@ const ui = {
     genome: document.getElementById("genome"),
     genomeInfo: document.getElementById("genomeInfo"),
     genomeTitle: document.getElementById("genomeTitle"),
+    btnTrain: document.getElementById("btnTrain"),
+    trainStatus: document.getElementById("trainStatus"),
+    stGen: document.getElementById("stGen"),
+    stBgFit: document.getElementById("stBgFit"),
+    evoChart: document.getElementById("evoChart"),
 };
 
 const app = {
@@ -473,6 +517,7 @@ const app = {
     flashUntil: 0,
     focus: 0,          // índice del jugador enfocado (clic o botones)
     genomeCache: new Map(), // idx -> {input_size, layer_sizes, layers}
+    loopErrorLogged: false,  // solo se avisa una vez del error de render
 };
 
 function setBadge() {
@@ -545,7 +590,7 @@ function fetchGenome(idx) {
     const input_size = Number(raw.input_size ?? 0);
     const layer_sizes = Array.from(raw.layer_sizes ?? [], Number);
     const flat = Array.from(raw.genome ?? []);
-    try { if (typeof raw.free === "function") raw.free(); } catch {}
+    try {if (typeof raw.free === "function") raw.free();} catch { }
     if (!input_size || !layer_sizes.length || !flat.length) return null;
     // Decodifica [bias, w0..] por neurona y capa.
     const layers = [];
@@ -711,10 +756,33 @@ function reset() {
 
 let hudLast = 0;
 function loop(now) {
+    try {
+        renderFrame(now);
+    } catch (err) {
+        // Una excepción dentro del bucle MATARÍA el render para siempre: el
+        // requestAnimationFrame final no se alcanzaría y el canvas se quedaría
+        // congelado (el "campo desaparece"). Se aísla el fallo y se reporta.
+        if (!app.loopErrorLogged) {
+            app.loopErrorLogged = true;
+            console.error("[neurokick] error en el bucle de render:", err);
+            if (ui.err) {
+                ui.err.hidden = false;
+                ui.err.textContent = "Error de render (ver consola): " + (err?.message ?? err);
+            }
+        }
+    } finally {
+        // El siguiente fotograma se pide SIEMPRE, incluso si algo falló.
+        requestAnimationFrame(loop);
+    }
+}
+
+function renderFrame(now) {
     const dt = now - app.lastT;
     app.lastT = now;
     if (dt > 0) app.fpsEMA += (1000 / dt - app.fpsEMA) * 0.06;
 
+    // El escaparate es la sim local: siempre avanza aquí, a velocidad humana.
+    // El fondo corre por su cuenta en el worker (no se esperan entre sí).
     if (app.running) advance(app.stepsPerFrame);
 
     drawField();
@@ -731,8 +799,17 @@ function loop(now) {
         const lines = app.state.players.map((p, i) => `jugador ${i}: (${p.x.toFixed(2)}, ${p.y.toFixed(2)})`);
         lines.push(`balón: (${app.state.ball.x.toFixed(2)}, ${app.state.ball.y.toFixed(2)})`);
         ui.pos.textContent = lines.join("\n");
+        if (ui.stGen) ui.stGen.textContent = String(bg.generation);
+        if (ui.stBgFit) {
+            const h = bg.history[bg.history.length - 1];
+            ui.stBgFit.textContent = h
+                ? `mejor ${h.best.toFixed(1)} · media ${h.avg.toFixed(1)}`
+                : "—";
+        }
+        // Se redibuja en cada refresco del HUD: la gráfica muestra el
+        // progreso mientras la generación en curso avanza, no solo al cerrarse.
+        drawEvolution();
     }
-    requestAnimationFrame(loop);
 }
 
 // ---------------------------------------------------------------- eventos
@@ -746,7 +823,7 @@ canvas.addEventListener("click", (ev) => {
     let best = 0, bestD = Infinity;
     app.state.players.forEach((p, i) => {
         const d = (p.x - mx) ** 2 + (p.y - my) ** 2;
-        if (d < bestD) { bestD = d; best = i; }
+        if (d < bestD) {bestD = d; best = i;}
     });
     if (Math.sqrt(bestD) < 6) setFocus(best);
 });
@@ -758,7 +835,7 @@ ui.speed.addEventListener("input", () => {
     app.stepsPerFrame = Number(ui.speed.value);
     ui.speedVal.textContent = ui.speed.value;
 });
-window.addEventListener("resize", () => drawGenome());
+window.addEventListener("resize", () => {drawGenome(); drawEvolution();});
 // Sin control por teclado: toda la interacción es con los botones.
 
 // ---------------------------------------------------------------- init
@@ -785,4 +862,447 @@ loadSimulation().then(({sim, mode}) => {
 });
 
 
+// ---------------------------------------------------------------- fondo
+// Trastienda: BG_WORKER_COUNT workers con su propia Simulation corriendo
+// train() a máxima velocidad, todos a la vez. Cada generación dura 6000 pasos
+// (ver GEN_STEPS en sim-worker.js). Al cumplirse, cada worker se congela y
+// entrega su veredicto (fitness + genomas); este hilo principal decide quién
+// sobrevive, cruza y muta (el algoritmo genético) y reparte los nuevos
+// cerebros con {type:"load"}. El escaparate es la sim local y solo cambia
+// cuando el usuario pulsa "Entrenar".
+
+const BG_WORKER_COUNT = 8;  // workers en paralelo. Para 40, sube a 40.
+const BG_BATCH = 2000;      // pasos por tanda: el worker repite hasta los 8000.
+const GEN_STEPS = 8000;     // pasos por generación (debe coincidir con el worker)
+
+// Parámetros del algoritmo genético (mismo criterio que
+// libs/genetic-algorithm/src/lib.rs: elitismo + torneo + cruce aritmético +
+// mutación gaussiana).
+const GA = {
+    elite: 2,            // showcaste el mejor sin tocarlo
+    tournament: 3,       // tamaño del torneo de selección de padres
+    crossoverAlpha: 0.5, // mezcla de los dos padres
+    mutationChance: 0.04,// probabilidad por gen de mutar
+    mutationCoeff: 0.3,  // magnitud del ruido
+};
+
+const bg = {
+    workers: [],       // [{worker, ready, mode, playerCount, stepsDone, frozen, fitness}]
+    generation: 0,     // generaciones completadas (toda la población)
+    running: false,    // ¿el orquestador está repartiendo?
+    results: new Map(),// workerIdx -> {fitness, genomes} de la generación en curso
+    history: [],       // [{gen, best, avg, worst}] para la curva
+    gen: 0,            // simulación mostrada en el escaparate
+    cloning: false,
+    pendingFrom: -1,
+    pendingGenomes: new Map(),
+};
+
+function bgReadyCount() {
+    return bg.workers.filter((w) => w.ready).length;
+}
+
+// Mejor jugador de la generación en curso (mayor fitness).
+function bgBest() {
+    let best = -1, bestFit = -Infinity, bestPlayer = -1;
+    bg.workers.forEach((w, i) => {
+        if (!w.ready) return;
+        w.fitness.forEach((f, p) => {
+            if (f > bestFit) {best = i; bestFit = f; bestPlayer = p;}
+        });
+    });
+    return best >= 0 ? {worker: best, player: bestPlayer, fitness: bestFit} : null;
+}
+
+function renderTrainStatus() {
+    if (!ui.trainStatus) return;
+    if (!bg.workers.length) {ui.trainStatus.textContent = "fondo parado…"; return;}
+    const best = bgBest();
+    const lines = [`generación ${bg.generation} · ${bgReadyCount()}/${bg.workers.length} workers · elitismo ${GA.elite} · mut ${(GA.mutationChance * 100).toFixed(0)}%`];
+    lines.push(bg.workers.map((w, i) => {
+        const fit = w.fitness.length ? w.fitness.map((f) => Number(f).toFixed(1)).join("/") : "—";
+        const star = best && best.worker === i ? " ★" : "";
+        const state = w.frozen ? "evaluado" : `${w.stepsDone}/${GEN_STEPS}`;
+        return `[${i}${star} ${state} fit ${fit}]`;
+    }).join(" "));
+    if (best) lines.push(`mejor: fondo ${best.worker} jugador ${best.player} · fitness ${best.fitness.toFixed(2)}`);
+    lines.push(`escaparate: simulación ${bg.gen}`);
+    ui.trainStatus.textContent = lines.join("\n");
+    if (ui.btnTrain) ui.btnTrain.disabled = best === null || !app.sim || bg.cloning;
+}
+
+// ------------------------------------------------------------------ GA
+// Réplica en JS del motor de libs/genetic-algorithm/src/lib.rs, orquestado
+// aquí porque los traits/genéricos de Rust no se exportan a wasm de forma
+// práctica y el hilo principal ya tiene los fitness de todos los workers.
+
+// Selección por torneo: elige al azar `tournament` candidatos y gana el mejor.
+function tournamentSelect(pop, rng) {
+    let best = null;
+    for (let i = 0; i < GA.tournament; i++) {
+        const cand = pop[Math.floor(rng() * pop.length)];
+        if (!best || cand.fitness > best.fitness) best = cand;
+    }
+    return best;
+}
+
+// Cruce aritmético: hijo = a*alpha + b*(1-alpha), gen a gen.
+function crossover(a, b, rng) {
+    const alpha = GA.crossoverAlpha;
+    const child = new Array(a.length);
+    for (let i = 0; i < a.length; i++) child[i] = a[i] * alpha + b[i] * (1 - alpha);
+    return child;
+}
+
+// Mutación gaussiana: cada gen tiene una probabilidad de moverse con ruido.
+function mutate(child, rng) {
+    for (let i = 0; i < child.length; i++) {
+        if (rng() < GA.mutationChance) {
+            // Ruido gaussiano aproximado (suma de dos uniformes centradas).
+            const noise = (rng() + rng() + rng() - 1.5) * GA.mutationCoeff;
+            child[i] += noise;
+        }
+    }
+    return child;
+}
+
+// Una generación: de la población actual,elitistas + hijos, vuelve el mismo tamaño.
+function evolve(population, rng) {
+    const sorted = [...population].sort((a, b) => b.fitness - a.fitness);
+    const next = [];
+    // Elitismo: los mejores pasan intactos.
+    for (let i = 0; i < Math.min(GA.elite, sorted.length); i++) {
+        next.push({genome: sorted[i].genome.slice(), fitness: sorted[i].fitness});
+    }
+    // El resto: dos padres por torneo, cruce y mutación.
+    while (next.length < population.length) {
+        const pa = tournamentSelect(population, rng);
+        const pb = tournamentSelect(population, rng);
+        const child = mutate(crossover(pa.genome, pb.genome, rng), rng);
+        // El fitness del hijo aún no existe: se medirá jugando.
+        next.push({genome: child, fitness: -Infinity});
+    }
+    return next;
+}
+
+// Cuando TODOS los workers han entregado su veredicto: evoluciona y reparte.
+function evolveGeneration() {
+    if (bg.results.size < bg.workers.length) return;
+
+    // Población = todos los jugadores de todos los workers de esta generación.
+    // Se descartan los fitness no finitos (NaN/Inf): si uno se colara,
+    // contaminaría las estadísticas y la gráfica Saldría con NaN.
+    const population = [];
+    let discarded = 0;
+    bg.workers.forEach((w, i) => {
+        const r = bg.results.get(i);
+        if (!r) return;
+        (r.genomes ?? []).forEach((genome, p) => {
+            const raw = r.fitness?.[p];
+            if (!Number.isFinite(raw)) { discarded++; return; }
+            population.push({ genome, fitness: Number(raw) });
+        });
+    });
+    if (!population.length) {
+        console.warn("[neurokick] generación sin fitness válido; se repite");
+        bg.results.clear();
+        bg.workers.forEach((w) => { w.stepsDone = 0; w.frozen = false; w.fitness = []; });
+        for (const w of bg.workers) bgRun(w);
+        renderTrainStatus();
+        return;
+    }
+    if (discarded) console.warn("[neurokick] fitness no finito descartado: " + discarded);
+
+    const finite = population.map((x) => x.fitness);
+    const stats = {
+        gen: bg.generation,
+        best: Math.max(...finite),
+        worst: Math.min(...finite),
+        avg: finite.reduce((a, b) => a + b, 0) / finite.length,
+    };
+    bg.history.push(stats);
+
+    const rng = Math.random;
+    const next = evolve(population, rng);
+    const bestGenome = population.reduce((a, b) => (b.fitness > a.fitness ? b : a)).genome;
+
+    // Reparto: cada worker recibe los jugadores de su puesto (mismo tamaño).
+    let cursor = 0;
+    bg.workers.forEach((w) => {
+        const n = w.playerCount || 2;
+        const genomes = [];
+        for (let p = 0; p < n; p++) {
+            const slot = next[cursor + p];
+            genomes.push(slot ? slot.genome : bestGenome);
+        }
+        cursor += n;
+        w.stepsDone = 0;
+        w.frozen = false;
+        w.fitness = [];
+        // El worker responde "loaded" cuando tiene el mundo nuevo; el arranque
+        // de la generación siguiente se dispara ahí (no aquí, para no encolar
+        // un "run" mientras el worker todavía está congelado).
+        w.worker.postMessage({type: "load", genomes});
+    });
+    bg.results.clear();
+    bg.generation += 1;
+    renderTrainStatus();
+    drawEvolution();
+    console.log(`[neurokick] generación ${stats.gen}: mejor ${stats.best.toFixed(2)} · media ${stats.avg.toFixed(2)} · peor ${stats.worst.toFixed(2)}`);
+}
+
+function bgRun(entry) {
+    if (!entry.ready || entry.frozen) return;
+    entry.worker.postMessage({type: "run", steps: BG_BATCH});
+}
+
+function onWorkerMessage(entry, ev) {
+    const msg = ev.data ?? {};
+    const idx = bg.workers.indexOf(entry);
+
+    if (msg.type === "ready") {
+        entry.ready = true;
+        entry.mode = msg.mode ?? "?";
+        entry.playerCount = Number(msg.player_count ?? 0);
+        entry.stepsDone = 0;
+        entry.frozen = false;
+        entry.fitness = [];
+        renderTrainStatus();
+        bgRun(entry); // arranca a máxima velocidad
+        return;
+    }
+
+    if (msg.type === "progress") {
+        entry.stepsDone = Number(msg.stepsDone ?? 0);
+        if (Array.isArray(msg.fitness)) entry.fitness = msg.fitness.map(Number);
+        renderTrainStatus();
+        bgRun(entry); // siguiente tanda hasta cumplir la generación
+        return;
+    }
+
+    if (msg.type === "done") {
+        // Generación cumplida en este worker: veredicto congelado.
+        entry.frozen = true;
+        entry.stepsDone = Number(msg.stepsDone ?? GEN_STEPS);
+        entry.fitness = Array.isArray(msg.fitness) ? msg.fitness.map(Number) : [];
+        bg.results.set(idx, {fitness: entry.fitness, genomes: msg.genomes});
+        renderTrainStatus();
+        // Barrera: cuando todos han entregado su veredicto, evolucionamos.
+        if (bg.results.size >= bg.workers.length) evolveGeneration();
+        return;
+    }
+
+    if (msg.type === "loaded") {
+        // Nuevo cerebro recibido: el worker confirma el mundo nuevo.
+        entry.stepsDone = Number(msg.stepsDone ?? 0);
+        if (Number.isFinite(Number(msg.player_count))) {
+            entry.playerCount = Number(msg.player_count);
+        }
+        entry.frozen = false;
+        bgRun(entry);
+        return;
+    }
+
+    if (msg.type === "snapshot") {
+        window.__neurokickBgSnapshot = msg.state;
+        return;
+    }
+
+    if (msg.type === "genome") {
+        if (idx !== bg.pendingFrom) return; // de otro worker, ignorar
+        bg.pendingGenomes.set(Number(msg.playerIdx ?? 0), {genome: msg.genome, fitness: msg.fitness});
+        finishCloneIfReady();
+        return;
+    }
+    if (msg.type === "error") {
+        console.warn("[neurokick] fondo error:", msg.message);
+        renderTrainStatus();
+    }
+}
+
+// Trae los cerebros al escaparate y REINICIA el partido con ellos.
+// Clonar solo los pesos no basta: la partida seguiría en curso con el
+// marcador y el fitness acumulados. Se crea una Simulation nueva (partido en
+// blanco) y se le cargan los cerebros encima: resetea todo menos las evoluciones.
+function finishCloneIfReady() {
+    const entry = bg.workers[bg.pendingFrom];
+    const n = entry?.playerCount || app.state.players.length || 0;
+    if (!entry || !n || bg.pendingGenomes.size < n) return;
+
+    const genomes = [];
+    for (let i = 0; i < n; i++) {
+        const g = bg.pendingGenomes.get(i);
+        if (g) genomes.push(g.genome);
+    }
+    bg.pendingGenomes.clear();
+    bg.pendingFrom = -1;
+    bg.cloning = false;
+
+    // Partido nuevo de verdad, con los mismos cerebros encima.
+    const fresh = createFreshSim();
+    if (typeof fresh.sim.from_genome !== "function") {
+        console.warn("[neurokick] from_genome() no existe en esta sim (¿pkg viejo?).");
+        app.sim = fresh.sim;
+        renderTrainStatus();
+        return;
+    }
+    genomes.forEach((genome, i) => {
+        try {fresh.sim.from_genome(i, genome);} catch (err) {
+            console.warn("[neurokick] fallo al cargar el genoma del jugador " + i, err);
+        }
+    });
+
+    // Sustituye la sim del escaparate y reinicia TODO su estado de partido.
+    app.sim = fresh.sim;
+    app.mode = fresh.mode;
+    app.frame = 0;
+    app.state = {players: [], ball: {x: 0, y: 0}, local_goals: 0, away_goals: 0};
+    app.trail = [];
+    app.headings = [];
+    app.prevPlayers = [];
+    app.lastScore = "0-0";
+    app.flashUntil = 0;
+    app.focus = 0;
+    app.genomeCache.clear();
+    bg.gen += 1; // siguiente simulación en el escaparate
+
+    advance(1);
+    syncFocusButtons();
+    updateScoreboard();
+    drawGenome();
+    renderTrainStatus();
+    console.log("[neurokick] partido reiniciado con los cerebros del fondo: simulación " + bg.gen);
+}
+
+// Botón Entrenar: clona aquí el cerebro del MEJOR jugador del fondo y
+// reinicia el partido del escaparate con esos cerebros.
+function onTrain() {
+    const best = bgBest();
+    if (!best || bg.cloning || !app.sim) return;
+    const entry = bg.workers[best.worker];
+    // Comprobación temprana: si este paquete no tiene from_genome, avisamos
+    // sin tocar el partido que se está viendo.
+    const probe = createFreshSim();
+    if (typeof probe.sim.from_genome !== "function") {
+        if (ui.trainStatus) ui.trainStatus.textContent = "No se puede entrenar: este pkg no tiene from_genome(). Regenera el wasm.";
+        return;
+    }
+    try {if (typeof probe.sim.free === "function") probe.sim.free();} catch { }
+    const n = entry.playerCount || (typeof app.sim.player_count === "function" ? app.sim.player_count() : 0) || 0;
+    if (!n) return;
+    bg.cloning = true;
+    bg.pendingFrom = best.worker;
+    bg.pendingGenomes.clear();
+    renderTrainStatus();
+    for (let i = 0; i < n; i++) entry.worker.postMessage({type: "genome", playerIdx: i});
+}
+
+function startBackground() {
+    // Los workers arrancan solos al cargar, sin panel: todos a la vez.
+    if (bg.workers.length) return;
+    for (let i = 0; i < BG_WORKER_COUNT; i++) {
+        const worker = new Worker(new URL("./sim-worker.js", import.meta.url), {type: "module"});
+        const entry = {
+            worker, ready: false, mode: "…", playerCount: 0,
+            stepsDone: 0, frozen: false, fitness: [],
+        };
+        worker.onmessage = (ev) => onWorkerMessage(entry, ev);
+        worker.onerror = (err) => console.warn("[neurokick] fondo" + i + " onerror:", err?.message ?? err);
+        bg.workers.push(entry);
+        worker.postMessage({type: "init"});
+    }
+    renderTrainStatus();
+}
+
+ui.btnTrain?.addEventListener("click", onTrain);
+
+// Curva de fitness por generación: si la media sube, están aprendiendo.
+function drawEvolution() {
+    const cv = ui.evoChart;
+    if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = cv.clientWidth || 280, H = 120;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    const g = cv.getContext("2d");
+    g.save();
+    g.scale(dpr, dpr);
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = "#0a0f1e";
+    g.fillRect(0, 0, W, H);
+
+    const hist = bg.history;
+    g.font = "9px ui-monospace, monospace";
+    g.fillStyle = "#93a1c0";
+    g.textAlign = "left";
+    if (!hist.length) {
+        g.fillText("generación 0 en curso…", 8, H / 2);
+        g.restore();
+        return;
+    }
+    // Rango vertical: incluye las generaciones cerradas y el mejor
+    // provisional de la que está en curso (evita saltos de escala).
+    const all = hist.flatMap((h) => [h.best, h.avg, h.worst]).filter(Number.isFinite);
+    if (!all.length) {
+        g.fillText("sin datos válidos", 8, H / 2);
+        g.restore();
+        return;
+    }
+    let lo = Math.min(...all), hi = Math.max(...all);
+    const live = liveBest();
+    if (live !== null) {lo = Math.min(lo, live); hi = Math.max(hi, live);}
+    if (hi - lo < 1e-6) {lo -= 1; hi += 1;}
+    const margin = (hi - lo) * 0.12;
+    lo -= margin; hi += margin;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {lo = 0; hi = 1;}
+    const pad = 10;
+    const denom = Math.max(1, hist.length); // incluye la x del punto en curso
+    const X = (i) => pad + (W - pad * 2) * (i / denom);
+    const Y = (v) => H - pad - (H - pad * 2) * ((v - lo) / (hi - lo));
+
+    const series = [
+        {key: "best", color: "#2ecc71"},
+        {key: "avg", color: "#4f8cff"},
+        {key: "worst", color: "#ff5d5d"},
+    ];
+    for (const s of series) {
+        g.strokeStyle = s.color;
+        g.lineWidth = s.key === "avg" ? 2 : 1;
+        g.beginPath();
+        hist.forEach((h, i) => {
+            const x = X(i), y = Y(h[s.key]);
+            if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        });
+        // Extensión provisional hacia la generación en curso: se prolonga la
+        // serie hasta la x siguiente con el mejor fitness medido hasta ahora.
+        if (live !== null) g.lineTo(X(hist.length), Y(live));
+        g.stroke();
+    }
+    g.fillStyle = "#93a1c0";
+    g.textAlign = "right";
+    g.fillText(hi.toFixed(1), W - 4, 10);
+    g.fillText(lo.toFixed(1), W - 4, H - 3);
+    g.textAlign = "left";
+    g.fillText("g" + hist[0].gen, 4, H - 3);
+    g.textAlign = "right";
+    g.fillText("g" + bg.generation, W - 4, 21);
+    g.restore();
+}
+
+// Mejor fitness provisional de la generación en curso (null si no hay datos).
+function liveBest() {
+    let best = null;
+    for (const w of bg.workers) {
+        for (const f of w.fitness) {
+            if (Number.isFinite(f) && (best === null || f > best)) best = f;
+        }
+    }
+    return best;
+}
+// El fondo arranca solo: los workers entran en bucle de generaciones.
+startBackground();
+renderTrainStatus();
+
+window.addEventListener("resize", () => {drawGenome(); drawEvolution();});
 window.__neurokick = app;
+window.__neurokickBg = bg;

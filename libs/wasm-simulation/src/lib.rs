@@ -27,6 +27,11 @@ impl Simulation {
         Data::new(game_data)
     }
 
+    pub fn show_positions(&self) -> Data {
+        let game_data: sim::GameData = self.sim.get_world_state();
+        Data::new(game_data)
+    }
+
     // Medidas para evitar el hardcodeo
     pub fn player_radius(&self) -> f32 {
         sim::PLAYER_RADIUS
@@ -79,6 +84,32 @@ impl Simulation {
                 layer_sizes: layer_sizes.into_iter().map(|s| s as u32).collect(),
                 genome,
             })
+    }
+    // Para la simulación del escaparate
+    pub fn from_genome(&mut self, idx: usize, genome: Vec<f32>) {
+        if let Some(p) = self.sim.players.get_mut(idx) {
+            p.from_genome(&genome);
+        }
+    }
+
+    pub fn get_fitness(&self, idx: usize) -> f32 {
+        self.sim
+            .players
+            .get(idx)
+            .map(|player| player.fitness)
+            .unwrap_or(0.0)
+    }
+
+    // Puesta a cero del fitness acumulado. Necesario al cerrar una generación:
+    // los cerebros se conservan, pero la puntuación del partido anterior no debe
+    // contaminar la siguiente, o el elitismo compararía valores acumulados.
+    pub fn reset_fitness(&mut self) {
+        for player in self.sim.players.iter_mut() {
+            player.fitness = 0.0;
+            player.prev_ball_distance = None;
+        }
+        self.sim.local_goals = 0;
+        self.sim.away_goals = 0;
     }
 }
 

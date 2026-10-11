@@ -102,8 +102,7 @@ impl GameWorld {
         let right_goal_handle = physics.colliders.insert(goal_right);
         let players = vec![
             // El orden debe ser jugador equipo 1, jugador equipo 2...
-            Player::new(&mut physics, Point2::new(-25.0, 0.0), Team::Blue),
-            Player::new(&mut physics, Point2::new(25.0, 0.0), Team::Red),
+            Player::new(&mut physics, Point2::new(25.0, 0.0), Team::Blue),
         ];
 
         let ball = GameBall::new(&mut physics, Point2::new(0.0, 0.0));
@@ -180,11 +179,9 @@ impl GameWorld {
         self.frame = self.frame.wrapping_add(1);
 
         self.physics.step();
+        self.add_shot_fitness();
         self.check_goals();
         self.check_touches();
-        if self.frame as f32 % (1.0 / self.dt()) == 0.0 {
-            self.add_situation_fitness();
-        }
         self.add_situation_fitness();
         for player in self.players.iter() {
             player.physics.reset_forces(&mut self.physics);
@@ -248,7 +245,6 @@ impl GameWorld {
             }
         }
     }
-
     pub fn check_touches(&mut self) {
         let mut has_player_touched = false;
         for (i, player) in self.players.iter().enumerate() {
@@ -288,6 +284,35 @@ impl GameWorld {
                 [self.away_goals, self.local_goals],
             );
         }
+        if self.frame.is_multiple_of((1.0 / self.dt()) as u64) {
+            for player in self.players.iter_mut() {
+                player.fitness += fitness_function.add_by_inactivity(player, &self.physics);
+            }
+        }
+    }
+
+    pub fn add_shot_fitness(&mut self) {
+        let fitness_function = match self.mode {
+            Mode::Exploration => ExplorationFitness::default(),
+            Mode::Competition => ExplorationFitness::default(),
+            Mode::Cooperation => ExplorationFitness::default(),
+            Mode::FinalTest => ExplorationFitness::default(),
+        };
+        for player in self.players.as_mut_slice() {
+            if !player.shot_on_frame(self.frame) {
+                continue;
+            }
+            let enemy_goal = match player.team {
+                Team::Blue => [FIELD_HALF_WIDTH, 0.0],
+                Team::Red => [-FIELD_HALF_WIDTH, 0.0],
+            };
+            player.fitness += fitness_function.add_by_shot(
+                &self.ball,
+                &self.physics,
+                self.prev_ball_vel.into(),
+                enemy_goal.into(),
+            );
+        }
     }
 
     pub fn get_world_state(&self) -> GameData {
@@ -321,8 +346,6 @@ impl GameWorld {
             }
         }
     }
-
-    pub fn bunch_train(&mut self, epochs: usize) {}
 }
 
 #[derive(Clone, Debug)]
@@ -332,31 +355,4 @@ pub struct GameData {
     pub score: [u32; 2],
 }
 
-use rayon::prelude::*;
-
-pub fn simulate_bunch(mode: Mode, sim_num: usize, epochs: u32) {
-    let population: Vec<PlayerIndividual> = (0..sim_num)
-        .into_par_iter()
-        .flat_map(|_| {
-            let mut game = GameWorld::new(PhysicsWorld::new());
-            for _ in 0..epochs {
-                game.step();
-            }
-
-            game.players
-                .into_iter()
-                .map(|player| PlayerIndividual::from_player(player))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    let genetic_algorithm = GeneticAlgorithm::new(
-        TournamentSelection::new(3),
-        ArithmeticCrossover::new(0.5),
-        GaussianMutation::new(0.25, 0.3),
-    );
-
-    let mut rng = rng();
-
-    let sons = genetic_algorithm.evolve(&mut rng, &population, 3);
-}
+// Función train bunch sustituida por web workers

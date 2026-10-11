@@ -46,17 +46,26 @@
                     <label><input id="chkCoords" type="checkbox" checked /> Coordenadas</label>
                 </div>
                 <p class="hint">Los cerebros mueven y chutan solos: sin teclado, todo es con botones.</p>
+                <div class="btn-row">
+                    <button id="btnTrain" type="button" class="btn primary" title="Trae el cerebro del mejor del fondo y reinicia el partido con él">🧬 Entrenar: siguiente simulación</button>
+                </div>
+                <p class="hint">Cada generación dura 6000 pasos: al terminar, sobreviven los mejores, se cruzan y mutan, y empieza la siguiente. <strong>Entrenar</strong> reinicia el partido del canvas con el mejor cerebro.</p>
+                <pre id="trainStatus" class="positions">fondo arrancando…</pre>
             </div>
 
             <div class="card">
                 <h2>Estado</h2>
                 <dl class="state">
+                    <div><dt>Generación</dt><dd id="stGen">0</dd></div>
+                    <div><dt>Fitness fondo</dt><dd id="stBgFit">—</dd></div>
                     <div><dt>Frame</dt><dd id="stFrame">0</dd></div>
                     <div><dt>FPS</dt><dd id="stFps">—</dd></div>
                     <div><dt>Modo</dt><dd id="stMode">…</dd></div>
                     <div><dt>Jugadores</dt><dd id="stPlayers">—</dd></div>
                     <div><dt>Marcador</dt><dd id="stScore">0 – 0</dd></div>
                 </dl>
+                <canvas id="evoChart" aria-label="Curva de fitness por generación"></canvas>
+                <p class="hint">Curva de aprendizaje: <span style="color:#2ecc71">verde</span> mejor · <span style="color:#4f8cff">azul</span> media · <span style="color:#ff5d5d">rojo</span> peor. Si el azul sube, están aprendiendo.</p>
                 <pre id="stPos" class="positions">esperando datos…</pre>
             </div>
 

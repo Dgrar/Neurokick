@@ -159,4 +159,8 @@ impl Player {
 
         self.brain = Network::random(&mut rng, 14, &topology);
     }
+
+    pub fn shot_on_frame(&self, frame: u64) -> bool {
+        frame > 0 && self.last_shot_frame + 1 == frame
+    }
 }

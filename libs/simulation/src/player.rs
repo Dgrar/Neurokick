@@ -14,6 +14,7 @@ const MAX_KICK_STRENGHT: f32 = 20.0;
 const SHOOT_RADIUS: f32 = 2.0;
 const MAX_AGENT_FORCE: f32 = 400.0;
 const SHOOT_COOLDOWN: u64 = 1;
+pub const TOUCH_REWARD_COOLDOWN: u64 = 30;
 
 #[derive(Debug, PartialEq)]
 pub enum Team {
@@ -29,6 +30,7 @@ pub struct Player {
     pub fitness: f32,
     pub prev_ball_distance: Option<f32>,
     last_shot_frame: u64,
+    last_touch_reward_frame: Option<u64>,
 }
 
 impl Player {
@@ -61,6 +63,7 @@ impl Player {
             fitness: 0.0,
             prev_ball_distance: None,
             last_shot_frame: 0,
+            last_touch_reward_frame: None,
         }
     }
 
@@ -162,5 +165,15 @@ impl Player {
 
     pub fn shot_on_frame(&self, frame: u64) -> bool {
         frame > 0 && self.last_shot_frame + 1 == frame
+    }
+
+    pub fn claim_reward_for_touching(&mut self, frame: u64) -> bool {
+        match self.last_touch_reward_frame {
+            Some(prev) if frame.saturating_sub(prev) < TOUCH_REWARD_COOLDOWN => false,
+            _ => {
+                self.last_touch_reward_frame = Some(frame);
+                true
+            }
+        }
     }
 }

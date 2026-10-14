@@ -242,6 +242,13 @@ html, body {
     white-space: pre-wrap;
 }
 
+/* Alto FIJO: el texto cambia en cada generación (fitness, workers, mejor).
+   Con max-height el bloque crecía y mengua, lo que desplazaba el layout,
+   disparaba el ResizeObserver y provocaba un frame negro en el canvas. */
+#trainStatus {
+    height: 132px;
+}
+
 .legend ul {
     list-style: none;
     margin: 0 0 0.6rem;

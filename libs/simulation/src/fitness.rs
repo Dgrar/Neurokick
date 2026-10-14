@@ -14,6 +14,8 @@ const SHOT_TOLERANCE: f32 = 0.7;
 pub struct ExplorationFitness {
     per_distance: f32,
     per_goal: f32,
+    per_score: f32,
+    per_goal_progress: f32,
     per_touch: f32,
     per_in_goal: f32,
     per_inactivity: f32,
@@ -35,6 +37,12 @@ pub trait FitnessFunction {
         prev_vel: Vec2,
         enemy_goal: Vec2,
     ) -> f32;
+    fn add_by_goal_progress(
+        &self,
+        ball: &GameBall,
+        physics_world: &PhysicsWorld,
+        enemy_goal: [f32; 2],
+    ) -> f32;
 }
 
 impl Default for ExplorationFitness {
@@ -42,7 +50,9 @@ impl Default for ExplorationFitness {
         Self {
             per_distance: 0.1,
             per_goal: 50.0,
-            per_touch: 1.0,
+            per_score: 0.0,
+            per_goal_progress: 0.1,
+            per_touch: 0.02,
             per_in_goal: 10.0,
             per_inactivity: -0.01,
         }
@@ -57,9 +67,19 @@ impl FitnessFunction for ExplorationFitness {
         physics_world: &PhysicsWorld,
         score: [u32; 2],
     ) -> f32 {
+        let mut fitness_gained = 0.0;
+
         let new_dist = player.get_distance_to(ball.physics.position(physics_world), physics_world);
         let prev_dist = player.prev_ball_distance.unwrap_or(new_dist);
-        self.per_distance * (prev_dist - new_dist)
+        fitness_gained += self.per_distance * (prev_dist - new_dist);
+
+        if player.team == Team::Blue {
+            fitness_gained += self.per_score * (score[0] - score[1]) as f32
+        } else {
+            fitness_gained += self.per_score * (score[1] - score[0]) as f32
+        }
+
+        fitness_gained
     }
     fn add_by_touch(&self) -> f32 {
         self.per_touch
@@ -99,5 +119,15 @@ impl FitnessFunction for ExplorationFitness {
             return 0.0;
         }
         self.per_in_goal
+    }
+    fn add_by_goal_progress(
+        &self,
+        ball: &GameBall,
+        physics_world: &PhysicsWorld,
+        enemy_goal: [f32; 2],
+    ) -> f32 {
+        let now_pos = ball.distance_to_goal(physics_world, enemy_goal);
+        let previous_pos = ball.prev_goal_distance.unwrap_or(now_pos);
+        self.per_goal_progress * (previous_pos - now_pos)
     }
 }

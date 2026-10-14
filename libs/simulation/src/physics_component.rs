@@ -106,6 +106,8 @@ impl PhysicsComponent {
     pub fn reset(&mut self, physics_world: &mut PhysicsWorld, pos_x: f32, pos_y: f32) {
         let body = physics_world.bodies.get_mut(self.body_handle).unwrap();
 
+        body.set_linvel(Vec2 { x: 0.0, y: 0.0 }, true);
+
         body.set_position(
             Pose2 {
                 rotation: Rot2 { re: 0.0, im: 0.0 },

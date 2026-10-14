@@ -1,12 +1,10 @@
 use std::ops::Div;
 
-use rand::rng;
 // Navegador no ejecuta funciones por debajo, solo ejecuta una simulación elegida
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
 
-use crate::{player_individual::PlayerIndividual, *};
+use crate::*;
 use nalgebra::Point2;
+use rand::{RngExt, rng};
 
 // Medidas del campo (línea de gol a línea de gol / banda a banda).
 pub const FIELD_HALF_WIDTH: f32 = 53.0;
@@ -14,6 +12,11 @@ pub const FIELD_HALF_HEIGHT: f32 = 34.5;
 // Portería: hueco de 11 m (y en [-5.5, 5.5]) y 4 m de fondo.
 pub const GOAL_HALF_HEIGHT: f32 = 5.5;
 pub const GOAL_DEPTH: f32 = 4.0;
+
+const WAKE_SPEED_THRESHOLD: f32 = 0.5; // m/s por debajo de la cual se considera dormido
+const WAKE_FRAMES: u64 = 60; // frames dormido antes de aplicar el impulso
+const WAKE_IMPULSE: f32 = 3.0; // La potencia que tiene al despertarse
+const WAKE_CORNER_MARGIN: f32 = 2.0; // metros desde cada pared para considerar esquina
 
 #[derive(Debug)]
 pub enum Mode {
@@ -34,6 +37,7 @@ pub struct GameWorld {
     last_touch_index: Option<u32>,
     frame: u64,
     prev_ball_vel: [f32; 2],
+    ball_sleep_frames: u64,
 }
 
 impl GameWorld {
@@ -118,6 +122,7 @@ impl GameWorld {
             last_touch_index: None,
             frame: 0,
             prev_ball_vel: [0.0, 0.0],
+            ball_sleep_frames: 0,
         }
     }
 
@@ -126,21 +131,18 @@ impl GameWorld {
     }
 
     pub fn reset(&mut self) {
-        let possible_positions = [0.0, 25.0, -25.0];
+        for player in self.players.iter_mut() {
+            let mut rng = rng();
 
-        for (i, player) in self.players.iter_mut().enumerate() {
-            let real_position_x = if player.team == Team::Blue {
-                25.0
-            } else {
-                -25.0
-            };
-            let real_position_y = possible_positions[(i + 1).div(2)];
+            let x = (rng.random::<f32>() * 2.0 - 1.0) * (FIELD_HALF_WIDTH - PLAYER_RADIUS);
+            let y = (rng.random::<f32>() * 2.0 - 1.0) * (FIELD_HALF_HEIGHT - PLAYER_RADIUS);
+            player.physics.reset(&mut self.physics, x, y);
 
-            player
-                .physics
-                .reset(&mut self.physics, real_position_x, real_position_y)
+            player.prev_ball_distance = None;
         }
         self.ball.physics.reset(&mut self.physics, 0.0, 0.0);
+        self.ball.prev_goal_distance = None;
+        self.ball_sleep_frames = 0;
     }
 
     fn process_brains(&mut self) {
@@ -178,6 +180,8 @@ impl GameWorld {
         self.prev_ball_vel = self.ball.physics.velocity(&self.physics);
         self.frame = self.frame.wrapping_add(1);
 
+        self.wake_ball_if_sleeping();
+
         self.physics.step();
         self.add_shot_fitness();
         self.check_goals();
@@ -188,6 +192,37 @@ impl GameWorld {
         }
         self.process_brains();
         self.ball.physics.reset_forces(&mut self.physics);
+    }
+
+    fn ball_is_in_corner(&self) -> bool {
+        let pos = self.ball.physics.position(&self.physics);
+        let corner_x = pos[0].abs() >= FIELD_HALF_WIDTH - WAKE_CORNER_MARGIN;
+        let corner_y = pos[1].abs() >= FIELD_HALF_HEIGHT - WAKE_CORNER_MARGIN;
+        corner_x && corner_y
+    }
+
+    fn wake_ball_if_sleeping(&mut self) {
+        if !self.ball_is_in_corner() {
+            self.ball_sleep_frames = 0;
+            return;
+        }
+        let velocity = self.ball.physics.velocity(&self.physics);
+        let speed = (velocity[0] * velocity[0] + velocity[1] * velocity[1]).sqrt();
+        if speed >= WAKE_SPEED_THRESHOLD {
+            self.ball_sleep_frames = 0;
+            return;
+        }
+        self.ball_sleep_frames = self.ball_sleep_frames.wrapping_add(1);
+        if self.ball_sleep_frames >= WAKE_FRAMES {
+            let mut rng = rng();
+            let angle = rng.random::<f32>() * PI * 2.0;
+            self.ball.physics.apply_impulse(
+                &mut self.physics,
+                angle.cos() * WAKE_IMPULSE,
+                angle.sin() * WAKE_IMPULSE,
+            );
+            self.ball_sleep_frames = 0;
+        }
     }
 
     pub fn apply_external_force(&mut self, idx: usize, fx: f32, fy: f32) {
@@ -223,9 +258,9 @@ impl GameWorld {
 
                     if let Some(player) = self.players.get_mut(p_i as usize) {
                         player.fitness += if player.team == Team::Red {
-                            -50.0
-                        } else {
                             50.0
+                        } else {
+                            -50.0
                         };
                     }
                 } else {
@@ -234,9 +269,9 @@ impl GameWorld {
 
                     if let Some(player) = self.players.get_mut(p_i as usize) {
                         player.fitness += if player.team == Team::Red {
-                            50.0
-                        } else {
                             -50.0
+                        } else {
+                            50.0
                         };
                     }
                 }
@@ -246,25 +281,14 @@ impl GameWorld {
         }
     }
     pub fn check_touches(&mut self) {
-        let mut has_player_touched = false;
+        self.last_touch_index = None;
         for (i, player) in self.players.iter().enumerate() {
-            let player_collider = self
-                .physics
-                .colliders
-                .get(self.ball.physics.collider_handle)
-                .unwrap();
             if let Some(contact) = self.physics.narrow_phase.contact_pair(
                 self.ball.physics.collider_handle,
                 player.physics.collider_handle,
-            ) {
-                if contact.has_any_active_contact() {
-                    if has_player_touched == false {
-                        self.last_touch_index = Some(i as u32);
-                        continue;
-                    }
-                    self.last_touch_index = None;
-                    break;
-                }
+            ) && contact.has_any_active_contact()
+            {
+                self.last_touch_index = Some(i as u32);
             }
         }
     }
@@ -276,7 +300,14 @@ impl GameWorld {
             Mode::Cooperation => ExplorationFitness::default(),
             Mode::FinalTest => ExplorationFitness::default(),
         };
+
         for player in self.players.iter_mut() {
+            let enemy_goal = match player.team {
+                Team::Blue => [FIELD_HALF_WIDTH, 0.0],
+                Team::Red => [-FIELD_HALF_WIDTH, 0.0],
+            };
+            player.fitness +=
+                fitness_function.add_by_goal_progress(&self.ball, &self.physics, enemy_goal);
             player.fitness += fitness_function.add_by_situation(
                 player,
                 &self.ball,
@@ -288,6 +319,13 @@ impl GameWorld {
             for player in self.players.iter_mut() {
                 player.fitness += fitness_function.add_by_inactivity(player, &self.physics);
             }
+        }
+
+        if let Some(idx) = self.last_touch_index
+            && let Some(pl) = self.players.get_mut(idx as usize)
+            && pl.claim_reward_for_touching(self.frame)
+        {
+            pl.fitness += fitness_function.add_by_touch();
         }
     }
 
@@ -306,6 +344,8 @@ impl GameWorld {
                 Team::Blue => [FIELD_HALF_WIDTH, 0.0],
                 Team::Red => [-FIELD_HALF_WIDTH, 0.0],
             };
+            self.ball.prev_goal_distance =
+                Some(self.ball.distance_to_goal(&self.physics, enemy_goal));
             player.fitness += fitness_function.add_by_shot(
                 &self.ball,
                 &self.physics,

@@ -174,7 +174,7 @@ async function loadSimulation() {
             try {
                 for (const p of probe.players ?? []) if (p && typeof p.free === "function") p.free();
                 if (probe.ball && typeof probe.ball.free === "function") probe.ball.free();
-            } catch {}
+            } catch { }
             if (typeof probe.free === "function") probe.free();
             readRadii(sim);
             readFieldDims(sim);
@@ -210,7 +210,7 @@ function snapshot(data) {
     try {
         rawPlayers = data.players ?? [];
         rawBall = data.ball;
-    } catch { /* mock antiguo: se construye a mano */ }
+    } catch { /* mock antiguo: se construye a mano */}
 
     const players = Array.from(rawPlayers ?? [], (p) => ({x: p.x, y: p.y}));
     const ball = {x: rawBall ? rawBall.x : 0, y: rawBall ? rawBall.y : 0};
@@ -220,7 +220,7 @@ function snapshot(data) {
         for (const p of rawPlayers ?? []) if (p && typeof p.free === "function") p.free();
         if (rawBall && typeof rawBall.free === "function") rawBall.free();
         if (typeof data.free === "function") data.free();
-    } catch { /* los objetos mock no tienen free(); sin problema */ }
+    } catch { /* los objetos mock no tienen free(); sin problema */}
     return {players, ball, local_goals, away_goals};
 }
 
@@ -237,8 +237,16 @@ function resize() {
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     view.w = Math.max(50, rect.width);
     view.h = Math.max(50, rect.height);
-    canvas.width = Math.round(view.w * view.dpr);
-    canvas.height = Math.round(view.h * view.dpr);
+    // Asignar canvas.width borra el bitmap SIEMPRE, aunque el valor sea el
+    // mismo (así lo define el estándar). El ResizeObserver llama a esta función
+    // en cada cambio de layout, y un borrado sin repintado es un frame negro.
+    // Solo se reasigna cuando el tamaño cambia de verdad.
+    const cw = Math.round(view.w * view.dpr);
+    const ch = Math.round(view.h * view.dpr);
+    if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+    }
     const sx = view.w / (FIELD.w + FIELD.margin * 2);
     const sy = view.h / (FIELD.h + FIELD.margin * 2);
     view.scale = Math.min(sx, sy);
@@ -871,7 +879,7 @@ loadSimulation().then(({sim, mode}) => {
 // cerebros con {type:"load"}. El escaparate es la sim local y solo cambia
 // cuando el usuario pulsa "Entrenar".
 
-const BG_WORKER_COUNT = 8;  // workers en paralelo. Para 40, sube a 40.
+const BG_WORKER_COUNT = 20;  // workers en paralelo. Para 40, sube a 40.
 const BG_BATCH = 2000;      // pasos por tanda: el worker repite hasta los 8000.
 const GEN_STEPS = 8000;     // pasos por generación (debe coincidir con el worker)
 
@@ -879,10 +887,10 @@ const GEN_STEPS = 8000;     // pasos por generación (debe coincidir con el work
 // libs/genetic-algorithm/src/lib.rs: elitismo + torneo + cruce aritmético +
 // mutación gaussiana).
 const GA = {
-    elite: 2,            // showcaste el mejor sin tocarlo
+    elite: 1,            // showcaste el mejor sin tocarlo
     tournament: 3,       // tamaño del torneo de selección de padres
     crossoverAlpha: 0.5, // mezcla de los dos padres
-    mutationChance: 0.04,// probabilidad por gen de mutar
+    mutationChance: 0.2,// probabilidad por gen de mutar
     mutationCoeff: 0.3,  // magnitud del ruido
 };
 
@@ -925,7 +933,17 @@ function renderTrainStatus() {
         const state = w.frozen ? "evaluado" : `${w.stepsDone}/${GEN_STEPS}`;
         return `[${i}${star} ${state} fit ${fit}]`;
     }).join(" "));
-    if (best) lines.push(`mejor: fondo ${best.worker} jugador ${best.player} · fitness ${best.fitness.toFixed(2)}`);
+
+    // Línea del mejor. Durante el reparto los workers aún no tienen fitness
+    // (se acaba de vaciar), así que se muestra el de la generación anterior:
+    // así el usuario ve siempre el mejor fitness mientras se intercambian los
+    // cerebros y no un hueco vacío.
+    const last = bg.history[bg.history.length - 1];
+    if (best) {
+        lines.push(`mejor: fondo ${best.worker} jugador ${best.player} · fitness ${best.fitness.toFixed(2)}`);
+    } else if (last) {
+        lines.push(`mejor g${last.gen}: ${last.best.toFixed(2)} · media ${last.avg.toFixed(2)} · intercambiando cerebros…`);
+    }
     lines.push(`escaparate: simulación ${bg.gen}`);
     ui.trainStatus.textContent = lines.join("\n");
     if (ui.btnTrain) ui.btnTrain.disabled = best === null || !app.sim || bg.cloning;
@@ -946,9 +964,9 @@ function tournamentSelect(pop, rng) {
     return best;
 }
 
-// Cruce aritmético: hijo = a*alpha + b*(1-alpha), gen a gen.
+// Cruce aritmético: hijo = a*alpha + b*(1-alpha), gen a gen, alfa aleatorio.
 function crossover(a, b, rng) {
-    const alpha = GA.crossoverAlpha;
+    const alpha = rng();
     const child = new Array(a.length);
     for (let i = 0; i < a.length; i++) child[i] = a[i] * alpha + b[i] * (1 - alpha);
     return child;
@@ -999,14 +1017,14 @@ function evolveGeneration() {
         if (!r) return;
         (r.genomes ?? []).forEach((genome, p) => {
             const raw = r.fitness?.[p];
-            if (!Number.isFinite(raw)) { discarded++; return; }
-            population.push({ genome, fitness: Number(raw) });
+            if (!Number.isFinite(raw)) {discarded++; return;}
+            population.push({genome, fitness: Number(raw)});
         });
     });
     if (!population.length) {
         console.warn("[neurokick] generación sin fitness válido; se repite");
         bg.results.clear();
-        bg.workers.forEach((w) => { w.stepsDone = 0; w.frozen = false; w.fitness = []; });
+        bg.workers.forEach((w) => {w.stepsDone = 0; w.frozen = false; w.fitness = [];});
         for (const w of bg.workers) bgRun(w);
         renderTrainStatus();
         return;
@@ -1026,7 +1044,14 @@ function evolveGeneration() {
     const next = evolve(population, rng);
     const bestGenome = population.reduce((a, b) => (b.fitness > a.fitness ? b : a)).genome;
 
-    // Reparto: cada worker recibe los jugadores de su puesto (mismo tamaño).
+    // Reparto: cada worker recibe los jugadores de su puesto. La suma debe
+    // coincidir con la población o los cerebros acabarían desalineados (cada
+    // worker jugaría con los genes de otro).
+    const needed = bg.workers.reduce((acc, w) => acc + (w.playerCount || 2), 0);
+    if (population.length !== needed) {
+        console.warn(`[neurokick] población (${population.length}) != necesarios (${needed}); se rellena con el mejor`);
+    }
+
     let cursor = 0;
     bg.workers.forEach((w) => {
         const n = w.playerCount || 2;

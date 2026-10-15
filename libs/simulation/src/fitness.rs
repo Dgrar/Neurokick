@@ -11,6 +11,8 @@ const MIN_SHOT_GAIN: f32 = 1.0;
 // En radianes 0.7 es aprox 45%
 const SHOT_TOLERANCE: f32 = 0.7;
 
+const PROXIMITY_RANGE: f32 = 25.0;
+
 pub struct ExplorationFitness {
     per_distance: f32,
     per_goal: f32,
@@ -19,6 +21,8 @@ pub struct ExplorationFitness {
     per_touch: f32,
     per_in_goal: f32,
     per_inactivity: f32,
+    per_corner: f32,
+    per_contact: f32,
 }
 pub trait FitnessFunction {
     fn add_by_situation(
@@ -43,18 +47,32 @@ pub trait FitnessFunction {
         physics_world: &PhysicsWorld,
         enemy_goal: [f32; 2],
     ) -> f32;
+    fn add_by_corner(&self, player: &Player, physics_world: &PhysicsWorld) -> f32;
+    /// Premio por estar en contacto con el balón. Es ACUMULATIVO (se paga
+    /// cada segundo mientras se mantiene el contacto), a diferencia de los
+    /// términos telescópicos. Eso es lo que da gradiente en el último metro:
+    /// la recompensa por distancia se agota al acercarse, y sin este término
+    /// el agente se queda a ~5 m, donde ya ha recogido casi todo el premio.
+    fn add_by_contact(&self, player: &Player, ball: &GameBall, physics_world: &PhysicsWorld)
+    -> f32;
 }
 
 impl Default for ExplorationFitness {
     fn default() -> Self {
         Self {
-            per_distance: 0.1,
+            per_distance: 1.0, // Priorizamos que el jugador llegue al balon
             per_goal: 50.0,
-            per_score: 0.0,
-            per_goal_progress: 0.1,
-            per_touch: 0.00,
+            per_score: 0.0, // En el 1v0, no queremos que la puntuación haga ruido
+            per_goal_progress: 0.5,
+            // +10 como mucho por vida
+            // Menor que el gol para que marcar siga siendo mejor.
+            per_touch: 0.2,
+            // Dar importancia a tiros a puerta
             per_in_goal: 10.0,
             per_inactivity: -0.01,
+            // POR SEGUNDO. Hacer que el jugador no se acerqye a las esquinas
+            per_corner: -0.1,
+            per_contact: 0.05,
         }
     }
 }
@@ -71,14 +89,8 @@ impl FitnessFunction for ExplorationFitness {
 
         let new_dist = player.get_distance_to(ball.physics.position(physics_world), physics_world);
         let prev_dist = player.prev_ball_distance.unwrap_or(new_dist);
-        fitness_gained += if !player
-            .physics
-            .is_in_corner(player.physics.position(physics_world))
-        {
-            self.per_distance * (prev_dist - new_dist)
-        } else {
-            -0.4
-        };
+
+        fitness_gained += self.per_distance * (prev_dist - new_dist);
 
         if player.team == Team::Blue {
             fitness_gained += self.per_score * (score[0] - score[1]) as f32
@@ -136,5 +148,25 @@ impl FitnessFunction for ExplorationFitness {
         let now_pos = ball.distance_to_goal(physics_world, enemy_goal);
         let previous_pos = ball.prev_goal_distance.unwrap_or(now_pos);
         self.per_goal_progress * (previous_pos - now_pos)
+    }
+    fn add_by_corner(&self, player: &Player, physics_world: &PhysicsWorld) -> f32 {
+        if player.physics.is_in_corner(
+            player.physics.position(physics_world),
+            Some(PLAYER_CORNER_MARGIN),
+        ) {
+            self.per_corner
+        } else {
+            0.0
+        }
+    }
+    fn add_by_contact(
+        &self,
+        player: &Player,
+        ball: &GameBall,
+        physics_world: &PhysicsWorld,
+    ) -> f32 {
+        let dist = player.get_distance_to(ball.physics.position(physics_world), physics_world);
+        let closeness = 1.0 - (dist / PROXIMITY_RANGE).clamp(0.0, 1.0);
+        self.per_contact * closeness * closeness
     }
 }

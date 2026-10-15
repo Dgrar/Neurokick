@@ -890,7 +890,7 @@ const GA = {
     elite: 1,            // showcaste el mejor sin tocarlo
     tournament: 3,       // tamaño del torneo de selección de padres
     crossoverAlpha: 0.5, // mezcla de los dos padres
-    mutationChance: 0.2,// probabilidad por gen de mutar
+    mutationChance: 0.08,// probabilidad por gen de mutar
     mutationCoeff: 0.3,  // magnitud del ruido
 };
 

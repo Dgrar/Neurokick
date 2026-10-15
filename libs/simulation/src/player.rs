@@ -104,7 +104,6 @@ impl Player {
         ball: &mut GameBall,
         own_goal_pos: [f32; 2],
         enemy_goal_pos: [f32; 2],
-        field_limits: [f32; 4],
         current_frame: u64,
     ) {
         let inputs = self.eye.see(
@@ -114,7 +113,6 @@ impl Player {
             ball,
             own_goal_pos,
             enemy_goal_pos,
-            field_limits,
         );
         let responses = self.brain.propagate(inputs.as_slice());
 

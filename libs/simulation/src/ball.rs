@@ -4,6 +4,7 @@ use crate::*;
 
 const BALL_MAX_SPEED: f32 = 20.0;
 const BALL_FRICTION: f32 = 0.2;
+
 const BALL_DAMPING: f32 = 0.6;
 pub const BALL_RADIUS: f32 = 0.3;
 const BALL_RESTITUTION: f32 = 0.8;

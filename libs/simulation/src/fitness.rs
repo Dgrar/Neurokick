@@ -52,7 +52,7 @@ impl Default for ExplorationFitness {
             per_goal: 50.0,
             per_score: 0.0,
             per_goal_progress: 0.1,
-            per_touch: 0.02,
+            per_touch: 0.00,
             per_in_goal: 10.0,
             per_inactivity: -0.01,
         }
@@ -71,7 +71,14 @@ impl FitnessFunction for ExplorationFitness {
 
         let new_dist = player.get_distance_to(ball.physics.position(physics_world), physics_world);
         let prev_dist = player.prev_ball_distance.unwrap_or(new_dist);
-        fitness_gained += self.per_distance * (prev_dist - new_dist);
+        fitness_gained += if !player
+            .physics
+            .is_in_corner(player.physics.position(physics_world))
+        {
+            self.per_distance * (prev_dist - new_dist)
+        } else {
+            -0.4
+        };
 
         if player.team == Team::Blue {
             fitness_gained += self.per_score * (score[0] - score[1]) as f32

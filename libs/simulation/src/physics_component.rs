@@ -116,4 +116,10 @@ impl PhysicsComponent {
             true,
         );
     }
+
+    pub fn is_in_corner(&self, pos: [f32; 2]) -> bool {
+        let corner_x = pos[0].abs() >= FIELD_HALF_WIDTH - WAKE_CORNER_MARGIN;
+        let corner_y = pos[1].abs() >= FIELD_HALF_HEIGHT - WAKE_CORNER_MARGIN;
+        corner_x && corner_y
+    }
 }

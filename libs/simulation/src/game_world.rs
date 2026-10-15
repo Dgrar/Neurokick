@@ -13,10 +13,12 @@ pub const FIELD_HALF_HEIGHT: f32 = 34.5;
 pub const GOAL_HALF_HEIGHT: f32 = 5.5;
 pub const GOAL_DEPTH: f32 = 4.0;
 
+const MIN_TOUCH_PROGRESS: f32 = 1.0;
+
 const WAKE_SPEED_THRESHOLD: f32 = 0.5; // m/s por debajo de la cual se considera dormido
 const WAKE_FRAMES: u64 = 60; // frames dormido antes de aplicar el impulso
 const WAKE_IMPULSE: f32 = 3.0; // La potencia que tiene al despertarse
-const WAKE_CORNER_MARGIN: f32 = 2.0; // metros desde cada pared para considerar esquina
+pub const WAKE_CORNER_MARGIN: f32 = 2.0; // metros desde cada pared para considerar esquina
 
 #[derive(Debug)]
 pub enum Mode {
@@ -194,15 +196,12 @@ impl GameWorld {
         self.ball.physics.reset_forces(&mut self.physics);
     }
 
-    fn ball_is_in_corner(&self) -> bool {
-        let pos = self.ball.physics.position(&self.physics);
-        let corner_x = pos[0].abs() >= FIELD_HALF_WIDTH - WAKE_CORNER_MARGIN;
-        let corner_y = pos[1].abs() >= FIELD_HALF_HEIGHT - WAKE_CORNER_MARGIN;
-        corner_x && corner_y
-    }
-
     fn wake_ball_if_sleeping(&mut self) {
-        if !self.ball_is_in_corner() {
+        if !self
+            .ball
+            .physics
+            .is_in_corner(self.ball.physics.position(&self.physics))
+        {
             self.ball_sleep_frames = 0;
             return;
         }
@@ -323,9 +322,22 @@ impl GameWorld {
 
         if let Some(idx) = self.last_touch_index
             && let Some(pl) = self.players.get_mut(idx as usize)
-            && pl.claim_reward_for_touching(self.frame)
         {
-            pl.fitness += fitness_function.add_by_touch();
+            let dist_now = self.ball.distance_to_goal(
+                &self.physics,
+                match pl.team {
+                    Team::Blue => [FIELD_HALF_WIDTH, 0.0],
+                    Team::Red => [-FIELD_HALF_WIDTH, 0.0],
+                },
+            );
+
+            let progressed = matches!(self.ball.dist_at_touch, Some(previous) if dist_now <= previous- MIN_TOUCH_PROGRESS);
+
+            if progressed && pl.claim_reward_for_touching(self.frame) {
+                pl.fitness += fitness_function.add_by_touch();
+            }
+
+            self.ball.dist_at_touch = Some(dist_now);
         }
     }
 
@@ -337,7 +349,11 @@ impl GameWorld {
             Mode::FinalTest => ExplorationFitness::default(),
         };
         for player in self.players.as_mut_slice() {
-            if !player.shot_on_frame(self.frame) {
+            if !player.shot_on_frame(self.frame)
+                && player
+                    .physics
+                    .is_in_corner(player.physics.position(&self.physics))
+            {
                 continue;
             }
             let enemy_goal = match player.team {

@@ -11,6 +11,7 @@ const BALL_MASS: f32 = 1.0;
 pub struct GameBall {
     pub physics: PhysicsComponent,
     pub prev_goal_distance: Option<f32>,
+    pub dist_at_touch: Option<f32>,
 }
 
 impl GameBall {
@@ -27,6 +28,7 @@ impl GameBall {
                 BALL_DAMPING,
             ),
             prev_goal_distance: None,
+            dist_at_touch: None,
         }
     }
     pub fn distance_to_goal(&self, physics_world: &PhysicsWorld, goal: [f32; 2]) -> f32 {

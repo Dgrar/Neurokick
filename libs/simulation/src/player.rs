@@ -6,14 +6,16 @@ use crate::*;
 
 const PLAYER_MAX_SPEED: f32 = 10.0;
 const PLAYER_FRICTION: f32 = 0.8;
-const PLAYER_DAMPING: f32 = 2.0;
+const PLAYER_DAMPING: f32 = 0.6;
 pub const PLAYER_RADIUS: f32 = 0.4;
 const PLAYER_RESTITUTION: f32 = 0.8;
 const PLAYER_MASS: f32 = 120.0;
-const MAX_KICK_STRENGHT: f32 = 20.0;
+const MAX_KICK_STRENGHT: f32 = 10.0;
 const SHOOT_RADIUS: f32 = 2.0;
 const MAX_AGENT_FORCE: f32 = 400.0;
-const SHOOT_COOLDOWN: u64 = 1;
+const SHOOT_COOLDOWN: u64 = 30;
+
+const SHOOT_THRESHOLD: f32 = 0.6;
 pub const TOUCH_REWARD_COOLDOWN: u64 = 30;
 
 #[derive(Debug, PartialEq)]
@@ -31,6 +33,7 @@ pub struct Player {
     pub prev_ball_distance: Option<f32>,
     last_shot_frame: u64,
     last_touch_reward_frame: Option<u64>,
+    pub scored: bool,
 }
 
 impl Player {
@@ -43,7 +46,7 @@ impl Player {
 
         let mut rng = rng();
 
-        let brain = Network::random(&mut rng, 14, &topology);
+        let brain = Network::random(&mut rng, EYE_INPUTS, &topology);
 
         let eye = Eye {};
         Player {
@@ -63,6 +66,7 @@ impl Player {
             fitness: 0.0,
             prev_ball_distance: None,
             last_shot_frame: 0,
+            scored: false,
             last_touch_reward_frame: None,
         }
     }
@@ -90,6 +94,11 @@ impl Player {
             let direction = delta.normalize();
 
             let shooting_vector = direction * MAX_KICK_STRENGHT * power;
+
+            let before: Vec2 = ball.physics.velocity(physics_world).into();
+
+            ball.shot_ref_vel = [before.x, before.y];
+            ball.shot_valid = true;
 
             ball.physics
                 .apply_impulse(physics_world, shooting_vector.x, shooting_vector.y);
@@ -124,8 +133,10 @@ impl Player {
             responses[0] * MAX_AGENT_FORCE,
             responses[1] * MAX_AGENT_FORCE,
         );
-        if responses[2] != 0.0 {
-            self.kick(physics_world, ball, responses[2], current_frame);
+        if responses[2] > SHOOT_THRESHOLD {
+            let power =
+                ((responses[2] - SHOOT_THRESHOLD) / (1.0 - SHOOT_THRESHOLD)).clamp(0.0, 1.0);
+            self.kick(physics_world, ball, power, current_frame);
         }
     }
 
@@ -147,7 +158,7 @@ impl Player {
             LayerTopology::uniform_layer(12, Activation::Relu),
             LayerTopology::output_layer(),
         ];
-        self.brain = Network::from_genome(14, &topology, genome.to_vec())
+        self.brain = Network::from_genome(EYE_INPUTS, &topology, genome.to_vec())
     }
 
     pub fn random_brain(&mut self) {
@@ -158,10 +169,12 @@ impl Player {
 
         let mut rng = rng();
 
-        self.brain = Network::random(&mut rng, 14, &topology);
+        self.brain = Network::random(&mut rng, EYE_INPUTS, &topology);
     }
 
     pub fn shot_on_frame(&self, frame: u64) -> bool {
+        // El chute se lanzó en el frame anterior; su impulso se integra en
+        // este, que es cuando se mide la ganancia.
         frame > 0 && self.last_shot_frame + 1 == frame
     }
 

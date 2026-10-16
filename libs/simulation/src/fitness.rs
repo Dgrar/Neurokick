@@ -6,23 +6,22 @@ use std::default::Default;
 //*   **Anotación de Gol (`+50.0` puntos):** Máxima recompensa instantánea de la fase.
 //*   **Penalización por Inactividad (`-0.01` puntos/s):** Aplicada si el jugador o el balón permanecen estáticos.
 
-const IDLE_SPEED: f32 = 1.0;
-const MIN_SHOT_GAIN: f32 = 1.0;
+const IDLE_SPEED: f32 = 0.1;
+const MIN_SHOT_GAIN: f32 = 3.0;
 // En radianes 0.7 es aprox 45%
 const SHOT_TOLERANCE: f32 = 0.7;
-
-const PROXIMITY_RANGE: f32 = 25.0;
+// Ganancia de velocidad a la que el chute paga el premio completo.
+const FULL_SHOT_GAIN: f32 = 10.0;
 
 pub struct ExplorationFitness {
+    pub per_goal: f32,
     per_distance: f32,
-    per_goal: f32,
     per_score: f32,
     per_goal_progress: f32,
     per_touch: f32,
     per_in_goal: f32,
     per_inactivity: f32,
     per_corner: f32,
-    per_contact: f32,
 }
 pub trait FitnessFunction {
     fn add_by_situation(
@@ -34,13 +33,7 @@ pub trait FitnessFunction {
     ) -> f32;
     fn add_by_touch(&self) -> f32;
     fn add_by_inactivity(&self, player: &Player, physics_world: &PhysicsWorld) -> f32;
-    fn add_by_shot(
-        &self,
-        ball: &GameBall,
-        physics_world: &PhysicsWorld,
-        prev_vel: Vec2,
-        enemy_goal: Vec2,
-    ) -> f32;
+    fn add_by_shot(&self, ball: &GameBall, physics_world: &PhysicsWorld, enemy_goal: Vec2) -> f32;
     fn add_by_goal_progress(
         &self,
         ball: &GameBall,
@@ -48,31 +41,19 @@ pub trait FitnessFunction {
         enemy_goal: [f32; 2],
     ) -> f32;
     fn add_by_corner(&self, player: &Player, physics_world: &PhysicsWorld) -> f32;
-    /// Premio por estar en contacto con el balón. Es ACUMULATIVO (se paga
-    /// cada segundo mientras se mantiene el contacto), a diferencia de los
-    /// términos telescópicos. Eso es lo que da gradiente en el último metro:
-    /// la recompensa por distancia se agota al acercarse, y sin este término
-    /// el agente se queda a ~5 m, donde ya ha recogido casi todo el premio.
-    fn add_by_contact(&self, player: &Player, ball: &GameBall, physics_world: &PhysicsWorld)
-    -> f32;
 }
 
 impl Default for ExplorationFitness {
     fn default() -> Self {
         Self {
-            per_distance: 1.0, // Priorizamos que el jugador llegue al balon
-            per_goal: 50.0,
-            per_score: 0.0, // En el 1v0, no queremos que la puntuación haga ruido
-            per_goal_progress: 0.5,
-            // +10 como mucho por vida
-            // Menor que el gol para que marcar siga siendo mejor.
-            per_touch: 0.2,
-            // Dar importancia a tiros a puerta
+            per_distance: 1.0,
+            per_goal: 150.0,
+            per_score: 0.0,
+            per_goal_progress: 1.0,
+            per_touch: 0.5,
             per_in_goal: 10.0,
             per_inactivity: -0.01,
-            // POR SEGUNDO. Hacer que el jugador no se acerqye a las esquinas
             per_corner: -0.1,
-            per_contact: 0.05,
         }
     }
 }
@@ -112,18 +93,18 @@ impl FitnessFunction for ExplorationFitness {
             0.0
         }
     }
-    fn add_by_shot(
-        &self,
-        ball: &GameBall,
-        physics_world: &PhysicsWorld,
-        prev_vel: Vec2,
-        enemy_goal: Vec2,
-    ) -> f32 {
+    fn add_by_shot(&self, ball: &GameBall, physics_world: &PhysicsWorld, enemy_goal: Vec2) -> f32 {
+        if !ball.shot_valid {
+            return 0.0;
+        }
+        let ref_vel: Vec2 = ball.shot_ref_vel.into();
         let velocity: Vec2 = ball.physics.velocity(physics_world).into();
         let speed_after = velocity.length();
-        let speed_before = prev_vel.length();
-
-        if speed_after <= speed_before + MIN_SHOT_GAIN {
+        if speed_after <= 0.0 {
+            return 0.0;
+        }
+        let gain = speed_after - ref_vel.length();
+        if gain < MIN_SHOT_GAIN {
             return 0.0;
         }
 
@@ -137,7 +118,8 @@ impl FitnessFunction for ExplorationFitness {
         if aim < SHOT_TOLERANCE {
             return 0.0;
         }
-        self.per_in_goal
+        let power = ((gain - MIN_SHOT_GAIN) / (FULL_SHOT_GAIN - MIN_SHOT_GAIN)).clamp(0.0, 1.0);
+        self.per_in_goal * power
     }
     fn add_by_goal_progress(
         &self,
@@ -158,15 +140,5 @@ impl FitnessFunction for ExplorationFitness {
         } else {
             0.0
         }
-    }
-    fn add_by_contact(
-        &self,
-        player: &Player,
-        ball: &GameBall,
-        physics_world: &PhysicsWorld,
-    ) -> f32 {
-        let dist = player.get_distance_to(ball.physics.position(physics_world), physics_world);
-        let closeness = 1.0 - (dist / PROXIMITY_RANGE).clamp(0.0, 1.0);
-        self.per_contact * closeness * closeness
     }
 }

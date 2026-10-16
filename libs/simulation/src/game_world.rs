@@ -40,6 +40,9 @@ pub struct GameWorld {
     frame: u64,
     prev_ball_vel: [f32; 2],
     ball_sleep_frames: u64,
+    ball_spawn: [f32; 2],
+    pub shots: u32,
+    pub hits: u32,
 }
 
 impl GameWorld {
@@ -150,6 +153,9 @@ impl GameWorld {
             frame: 0,
             prev_ball_vel: [0.0, 0.0],
             ball_sleep_frames: 0,
+            ball_spawn: [0.0, 0.0],
+            shots: 0,
+            hits: 0,
         }
     }
 
@@ -158,19 +164,40 @@ impl GameWorld {
     }
 
     pub fn reset(&mut self) {
+        let ball_x = self.ball_spawn[0];
         for player in self.players.iter_mut() {
             let mut rng = rng();
 
-            let x = (rng.random::<f32>() * 2.0 - 1.0) * (FIELD_HALF_WIDTH - PLAYER_RADIUS);
+            let limit = FIELD_HALF_WIDTH - PLAYER_RADIUS;
+            let (lo, hi) = match player.team {
+                Team::Blue => (ball_x - 18.0, ball_x - 6.0),
+                Team::Red => (ball_x + 6.0, ball_x + 18.0),
+            };
+            let (lo, hi) = if lo < hi { (lo, hi) } else { (hi, lo) };
+            let x = (lo + rng.random::<f32>() * (hi - lo)).clamp(-limit, limit);
             let y = (rng.random::<f32>() * 2.0 - 1.0) * (FIELD_HALF_HEIGHT - PLAYER_RADIUS);
             player.physics.reset(&mut self.physics, x, y);
 
             player.prev_ball_distance = None;
         }
-        self.ball.physics.reset(&mut self.physics, 0.0, 0.0);
+        self.ball
+            .physics
+            .reset(&mut self.physics, self.ball_spawn[0], self.ball_spawn[1]);
         self.ball.prev_goal_distance = None;
         self.ball.dist_at_touch = None;
         self.ball_sleep_frames = 0;
+        self.last_touch_index = None;
+    }
+
+    pub fn set_ball_spawn(&mut self, x: f32, y: f32) {
+        self.ball_spawn = [x, y];
+        self.ball
+            .physics
+            .reset(&mut self.physics, self.ball_spawn[0], self.ball_spawn[1]);
+        self.ball.prev_goal_distance = None;
+        self.ball.dist_at_touch = None;
+        self.ball_sleep_frames = 0;
+        self.last_touch_index = None;
     }
 
     fn process_brains(&mut self) {
@@ -199,7 +226,6 @@ impl GameWorld {
     }
 
     pub fn step(&mut self) {
-        self.prev_ball_vel = self.ball.physics.velocity(&self.physics);
         self.frame = self.frame.wrapping_add(1);
 
         self.wake_ball_if_sleeping();
@@ -263,6 +289,7 @@ impl GameWorld {
 
     fn check_goals(&mut self) {
         let ball_collider = self.ball.physics.collider_handle;
+        let per_goal = ExplorationFitness::default().per_goal;
         for (i, goal) in self.goals.iter().enumerate() {
             if self
                 .physics
@@ -276,22 +303,24 @@ impl GameWorld {
                     let p_i = self.last_touch_index.unwrap_or(10000000);
 
                     if let Some(player) = self.players.get_mut(p_i as usize) {
-                        player.fitness += if player.team == Team::Red {
-                            50.0
+                        if player.team == Team::Red {
+                            player.fitness += per_goal;
+                            player.scored = true;
                         } else {
-                            -50.0
-                        };
+                            player.fitness -= per_goal;
+                        }
                     }
                 } else {
                     self.away_goals += 1;
                     let p_i = self.last_touch_index.unwrap_or(10000000);
 
                     if let Some(player) = self.players.get_mut(p_i as usize) {
-                        player.fitness += if player.team == Team::Red {
-                            -50.0
+                        if player.team == Team::Red {
+                            player.fitness -= per_goal;
                         } else {
-                            50.0
-                        };
+                            player.fitness += per_goal;
+                            player.scored = true;
+                        }
                     }
                 }
                 self.reset();
@@ -300,7 +329,6 @@ impl GameWorld {
         }
     }
     pub fn check_touches(&mut self) {
-        self.last_touch_index = None;
         for (i, player) in self.players.iter().enumerate() {
             if let Some(contact) = self.physics.narrow_phase.contact_pair(
                 self.ball.physics.collider_handle,
@@ -321,6 +349,9 @@ impl GameWorld {
         };
 
         for player in self.players.iter_mut() {
+            if player.scored {
+                continue;
+            }
             let enemy_goal = match player.team {
                 Team::Blue => [FIELD_HALF_WIDTH, 0.0],
                 Team::Red => [-FIELD_HALF_WIDTH, 0.0],
@@ -339,13 +370,11 @@ impl GameWorld {
         }
         if self.frame.is_multiple_of((1.0 / self.dt()) as u64) {
             for player in self.players.iter_mut() {
+                if player.scored {
+                    continue;
+                }
                 player.fitness += fitness_function.add_by_inactivity(player, &self.physics);
                 player.fitness += fitness_function.add_by_corner(player, &self.physics);
-                player.fitness += fitness_function.add_by_contact(
-                    player,
-                    &self.ball,
-                    &self.physics,
-                );
             }
         }
 
@@ -377,9 +406,13 @@ impl GameWorld {
             Mode::FinalTest => ExplorationFitness::default(),
         };
         for player in self.players.as_mut_slice() {
+            if player.scored {
+                continue;
+            }
             if !player.shot_on_frame(self.frame) {
                 continue;
             }
+            self.shots += 1;
             if player.physics.is_in_corner(
                 player.physics.position(&self.physics),
                 Some(PLAYER_CORNER_MARGIN),
@@ -390,12 +423,12 @@ impl GameWorld {
                 Team::Blue => [FIELD_HALF_WIDTH, 0.0],
                 Team::Red => [-FIELD_HALF_WIDTH, 0.0],
             };
-            player.fitness += fitness_function.add_by_shot(
-                &self.ball,
-                &self.physics,
-                self.prev_ball_vel.into(),
-                enemy_goal.into(),
-            );
+            let gained = fitness_function.add_by_shot(&self.ball, &self.physics, enemy_goal.into());
+            player.fitness += gained;
+            if gained > 0.0 {
+                self.hits += 1;
+            }
+            self.ball.shot_valid = false;
         }
     }
 

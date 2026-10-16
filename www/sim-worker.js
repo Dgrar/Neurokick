@@ -29,6 +29,28 @@
 
 const GEN_STEPS = 8000; // pasos por generación (barrera de evolución)
 
+// Currículo de dificultad: el balón empieza pegado a la portería rival y se
+// va alejando conforme pasan las generaciones. Al principio el jugador (x=25)
+// queda DETRÁS del balón respecto a la portería, así que empujar en recto ya
+// va en la dirección correcta; al final el problema es el de verdad.
+const CURRICULUM_NEAR_DIST = 8;  // metros desde la portería en la gen 0
+const CURRICULUM_FAR_DIST = 53;  // hasta el centro del campo
+const CURRICULUM_LATERAL = 10;   // dispersión lateral (evita memorizar un carril)
+
+
+// El hilo principal manda la posición: todos los workers de una generación
+// reciben la MISMA, para que sus genomas se comparen en la misma tarea. Si no,
+// cada uno sortearía la suya y la selección premiaría la suerte.
+function applyCurriculum(msg) {
+    if (!sim || typeof sim.set_ball_spawn !== "function") return;
+    try {
+        const x = Number(msg?.ballX);
+        const y = Number(msg?.ballY);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+        sim.set_ball_spawn(x, y);
+    } catch {}
+}
+
 // --- Mock de reserva (misma idea que script.js, física mínima de demo) ---
 class MockSimulation {
     constructor() {
@@ -54,6 +76,7 @@ class MockSimulation {
     player_count() {return 1;}
     get_fitness() {return 0;}
     from_genome(idx, genome) {this._genomes.set(idx, Array.from(genome ?? []));}
+    set_ball_spawn(x, y) {this.bx = x; this.by = y; this.bvx = 0; this.bvy = 0;}
     show_genome(idx) {
         if (this._genomes.has(idx)) {
             return {input_size: 14, layer_sizes: [12, 3], genome: this._genomes.get(idx)};
@@ -195,6 +218,7 @@ onmessage = async (e) => {
             frozen = false;
             let n = 1;
             try {if (typeof sim.player_count === "function") n = sim.player_count();} catch { }
+            applyCurriculum(msg);
             postMessage({type: "ready", mode, player_count: n});
             return;
         }
@@ -246,6 +270,7 @@ if (msg.type === "load") {
             // El mundo nuevo nace con fitness a 0, pero se pide explícitamente
             // por si el paquete se reutiliza sin recrear la Simulation.
             try { if (typeof sim.reset_fitness === "function") sim.reset_fitness(); } catch {}
+            applyCurriculum(msg);
             let n = genomes.length || 1;
             try { if (typeof sim.player_count === "function") n = sim.player_count(); } catch {}
             stepsDone = 0;

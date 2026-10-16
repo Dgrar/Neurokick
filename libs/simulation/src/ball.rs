@@ -2,7 +2,7 @@ use nalgebra::Point2;
 
 use crate::*;
 
-const BALL_MAX_SPEED: f32 = 20.0;
+pub const BALL_MAX_SPEED: f32 = 20.0;
 const BALL_FRICTION: f32 = 0.2;
 
 const BALL_DAMPING: f32 = 0.6;
@@ -13,6 +13,8 @@ pub struct GameBall {
     pub physics: PhysicsComponent,
     pub prev_goal_distance: Option<f32>,
     pub dist_at_touch: Option<f32>,
+    pub shot_ref_vel: [f32; 2],
+    pub shot_valid: bool,
 }
 
 impl GameBall {
@@ -30,6 +32,8 @@ impl GameBall {
             ),
             prev_goal_distance: None,
             dist_at_touch: None,
+            shot_ref_vel: [0.0, 0.0],
+            shot_valid: false,
         }
     }
     pub fn distance_to_goal(&self, physics_world: &PhysicsWorld, goal: [f32; 2]) -> f32 {

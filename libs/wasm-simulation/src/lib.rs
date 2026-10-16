@@ -107,9 +107,29 @@ impl Simulation {
         for player in self.sim.players.iter_mut() {
             player.fitness = 0.0;
             player.prev_ball_distance = None;
+            player.scored = false;
         }
         self.sim.local_goals = 0;
         self.sim.away_goals = 0;
+    }
+
+    /// Currículo de dificultad: fija dónde aparece el balón en cada `reset()`.
+    /// El hilo principal lo llama al cargar una generación nueva.
+    pub fn set_ball_spawn(&mut self, x: f32, y: f32) {
+        self.sim.set_ball_spawn(x, y);
+    }
+
+    /// Cuántos disparos se han ejecutado de verdad. Sirve para comprobar si el
+    /// umbral del chute lo llega a cruzar la red alguna vez.
+    pub fn shots(&self) -> u32 {
+        self.sim.shots
+    }
+
+    /// Disparos que además aceleraron el balón de verdad (los que pagan
+    /// `per_in_goal`). La diferencia con `shots()` dice si el jugador está
+    /// fallando el chute o disparando con fuerza cero.
+    pub fn hits(&self) -> u32 {
+        self.sim.hits
     }
 }
 

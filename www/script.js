@@ -883,6 +883,29 @@ const BG_WORKER_COUNT = 20;  // workers en paralelo. Para 40, sube a 40.
 const BG_BATCH = 2000;      // pasos por tanda: el worker repite hasta los 8000.
 const GEN_STEPS = 8000;     // pasos por generación (debe coincidir con el worker)
 
+// Currículo: número de generaciones que tardan en llevar el balón desde la
+// portería rival hasta el centro del campo. Luego se queda en dificultad
+// máxima indefinidamente.
+const CURRICULUM_GENERATIONS = 30;
+
+function curriculumDifficulty(generation) {
+    return Math.max(0, Math.min(1, generation / CURRICULUM_GENERATIONS));
+}
+
+// Una única posición de balón POR GENERACIÓN. Todos los workers la reciben
+// igual: si cada uno sorteara la suya, cada genoma se evaluaría en una tarea
+// distinta y la selección compararía unfairly. La variación va de generación
+// a generación, que es donde evita que la población memorice un solo punto.
+const CURRICULUM_NEAR_DIST = 8;
+const CURRICULUM_FAR_DIST = 53;
+const CURRICULUM_LATERAL = 10;
+
+function curriculumBallSpawn(generation, halfWidth) {
+    const t = curriculumDifficulty(generation);
+    const dist = CURRICULUM_NEAR_DIST + (CURRICULUM_FAR_DIST - CURRICULUM_NEAR_DIST) * t;
+    return [halfWidth - dist, (Math.random() * 2 - 1) * CURRICULUM_LATERAL];
+}
+
 // Parámetros del algoritmo genético (mismo criterio que
 // libs/genetic-algorithm/src/lib.rs: elitismo + torneo + cruce aritmético +
 // mutación gaussiana).
@@ -1052,6 +1075,10 @@ function evolveGeneration() {
         console.warn(`[neurokick] población (${population.length}) != necesarios (${needed}); se rellena con el mejor`);
     }
 
+    // Una sola posición de balón para TODA la generación: así los 20 genomas
+    // se comparan en la misma tarea y el elitismo significa algo.
+    const [bx, by] = curriculumBallSpawn(bg.generation + 1, 53);
+
     let cursor = 0;
     bg.workers.forEach((w) => {
         const n = w.playerCount || 2;
@@ -1067,7 +1094,7 @@ function evolveGeneration() {
         // El worker responde "loaded" cuando tiene el mundo nuevo; el arranque
         // de la generación siguiente se dispara ahí (no aquí, para no encolar
         // un "run" mientras el worker todavía está congelado).
-        w.worker.postMessage({type: "load", genomes});
+        w.worker.postMessage({type: "load", genomes, ballX: bx, ballY: by});
     });
     bg.results.clear();
     bg.generation += 1;
@@ -1225,6 +1252,7 @@ function onTrain() {
 function startBackground() {
     // Los workers arrancan solos al cargar, sin panel: todos a la vez.
     if (bg.workers.length) return;
+    const [bx, by] = curriculumBallSpawn(0, 53);
     for (let i = 0; i < BG_WORKER_COUNT; i++) {
         const worker = new Worker(new URL("./sim-worker.js", import.meta.url), {type: "module"});
         const entry = {
@@ -1234,7 +1262,7 @@ function startBackground() {
         worker.onmessage = (ev) => onWorkerMessage(entry, ev);
         worker.onerror = (err) => console.warn("[neurokick] fondo" + i + " onerror:", err?.message ?? err);
         bg.workers.push(entry);
-        worker.postMessage({type: "init"});
+        worker.postMessage({type: "init", ballX: bx, ballY: by});
     }
     renderTrainStatus();
 }
